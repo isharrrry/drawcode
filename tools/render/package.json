@@ -1,0 +1,17 @@
+{
+  "name": "drawcode-render",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline .drawio -> SVG -> PNG rendering using draw.io's own mxGraph engine",
+  "type": "commonjs",
+  "scripts": {
+    "render": "node render_drawio.js",
+    "png": "node render_png.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "jsdom": "^30.1.2",
+    "mxgraph": "^4.2.2"
+  }
+}

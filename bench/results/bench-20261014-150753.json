@@ -1,0 +1,26 @@
+﻿{
+    "generated_at":  "2026-10-14T15:07:55.1769253+08:00",
+    "machine":  {
+                    "cores":  8,
+                    "cpu":  "Intel(R) Core(TM) i5-10200H CPU @ 2.40GHz",
+                    "os":  "Microsoft Windows 10.0.22631 "
+                },
+    "toolchain":  {
+                      "node":  "v24.16.0",
+                      "dotnet":  "10.0.203",
+                      "python":  "Python 3.14.6"
+                  },
+    "repeat":  2,
+    "results":  [
+                    {
+                        "size":  "s",
+                        "lang":  "python",
+                        "modules":  5,
+                        "files":  10,
+                        "median_ms":  500.1,
+                        "min_ms":  477,
+                        "ok":  true,
+                        "note":  ""
+                    }
+                ]
+}

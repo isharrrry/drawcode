@@ -1,0 +1,161 @@
+{
+  "devices": [
+    {
+      "asset": "assets/ads1115.svg",
+      "id": "Adc.cs::AdcRead",
+      "model": "ADS1115",
+      "size": "2.0x3.0mm",
+      "spec": "16bit/860SPS",
+      "vendor": "TI"
+    }
+  ],
+  "edges": [
+    {
+      "dst": "Adc.cs::g_filtered",
+      "rw": "write",
+      "src": "Adc.cs::AdcRead"
+    },
+    {
+      "dst": "Adc.cs::AdcRead",
+      "rw": "read",
+      "src": "Adc.cs::g_raw"
+    },
+    {
+      "dst": "Dsp.cs::FirApply",
+      "rw": "read",
+      "src": "Adc.cs::g_raw"
+    },
+    {
+      "dst": "Adc.cs::g_filtered",
+      "rw": "write",
+      "src": "Dsp.cs::FirApply"
+    },
+    {
+      "dst": "Dsp.cs::g_coeff",
+      "rw": "write",
+      "src": "Dsp.cs::SetGain"
+    },
+    {
+      "dst": "Dsp.cs::FirApply",
+      "rw": "read",
+      "src": "Dsp.cs::g_coeff"
+    }
+  ],
+  "files": [
+    "Adc.cs",
+    "Dsp.cs"
+  ],
+  "funcs": [
+    {
+      "alias": "ADC 采样",
+      "asset": "assets/ads1115.svg",
+      "calls": [
+        "Dsp.cs::FirApply"
+      ],
+      "external": false,
+      "file": "Adc.cs",
+      "group": "Adc",
+      "id": "Adc.cs::AdcRead",
+      "line": 13,
+      "name": "AdcRead",
+      "note": "",
+      "params": [],
+      "reads": [
+        "Adc.cs::g_raw"
+      ],
+      "ret": "short",
+      "tooltip": "上电后需先校准",
+      "writes": [
+        "Adc.cs::g_filtered"
+      ]
+    },
+    {
+      "alias": "FIR 滤波",
+      "asset": "",
+      "calls": [],
+      "external": false,
+      "file": "Dsp.cs",
+      "group": "Dsp",
+      "id": "Dsp.cs::FirApply",
+      "line": 9,
+      "name": "FirApply",
+      "note": "",
+      "params": [],
+      "reads": [
+        "Adc.cs::g_raw",
+        "Dsp.cs::g_coeff"
+      ],
+      "ret": "void",
+      "tooltip": "",
+      "writes": [
+        "Adc.cs::g_filtered"
+      ]
+    },
+    {
+      "alias": "设置增益",
+      "asset": "",
+      "calls": [],
+      "external": false,
+      "file": "Dsp.cs",
+      "group": "Dsp",
+      "id": "Dsp.cs::SetGain",
+      "line": 18,
+      "name": "SetGain",
+      "note": "",
+      "params": [
+        {
+          "ctype": "byte",
+          "dir": "in",
+          "name": "gain"
+        }
+      ],
+      "reads": [],
+      "ret": "void",
+      "tooltip": "",
+      "writes": [
+        "Dsp.cs::g_coeff"
+      ]
+    }
+  ],
+  "signals": [
+    {
+      "alias": "滤波输出",
+      "ctype": "short",
+      "dir": "out",
+      "external": false,
+      "file": "Adc.cs",
+      "group": "Adc",
+      "id": "Adc.cs::g_filtered",
+      "line": 9,
+      "name": "g_filtered",
+      "note": "",
+      "unit": "LSB"
+    },
+    {
+      "alias": "原始采样值",
+      "ctype": "short",
+      "dir": "in",
+      "external": false,
+      "file": "Adc.cs",
+      "group": "Adc",
+      "id": "Adc.cs::g_raw",
+      "line": 6,
+      "name": "g_raw",
+      "note": "上电后需校准",
+      "unit": "LSB"
+    },
+    {
+      "alias": "滤波系数",
+      "ctype": "float[]",
+      "dir": "in",
+      "external": false,
+      "file": "Dsp.cs",
+      "group": "Dsp",
+      "id": "Dsp.cs::g_coeff",
+      "line": 6,
+      "name": "g_coeff",
+      "note": "",
+      "unit": "coeff"
+    }
+  ]
+}

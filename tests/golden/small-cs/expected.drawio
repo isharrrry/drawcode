@@ -1,0 +1,106 @@
+<mxfile host="app.diagrams.net" agent="drawcode" type="device">
+  <diagram id="drawcode" name="dataflow">
+    <mxGraphModel adaptiveColors="auto" dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="grp1" value="Adc" style="swimlane;startSize=30;collapsible=0;recursiveResize=0;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;" vertex="1" parent="1">
+          <mxGeometry x="0" y="30" width="240" height="362" as="geometry" />
+        </mxCell>
+        <mxCell id="grp2" value="Dsp" style="swimlane;startSize=30;collapsible=0;recursiveResize=0;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;" vertex="1" parent="1">
+          <mxGeometry x="360" y="30" width="240" height="374" as="geometry" />
+        </mxCell>
+        <object id="n1" label="ADC 采样()&lt;br&gt;short AdcRead()" symbolId="Adc.cs::AdcRead" kind="func" ret="short" alias="ADC 采样" tooltip="上电后需先校准" asset="assets/ads1115.svg" vendor="TI" model="ADS1115" spec="16bit/860SPS" size="2.0x3.0mm">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="grp1">
+            <mxGeometry x="30" y="160" width="180" height="72" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="n2" label="g_filtered&lt;br&gt;short / out / LSB" symbolId="Adc.cs::g_filtered" kind="signal" ctype="short" dir="out" unit="LSB" alias="滤波输出">
+          <mxCell style="shape=path;path=45,0 160,0 160,60 45,60 0,30;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="grp1">
+            <mxGeometry x="30" y="272" width="160" height="60" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="n3" label="g_raw&lt;br&gt;short / in / LSB" symbolId="Adc.cs::g_raw" kind="signal" ctype="short" dir="in" unit="LSB" alias="原始采样值" note="上电后需校准">
+          <mxCell style="shape=path;path=0,0 115,0 160,30 115,60 0,60;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="grp1">
+            <mxGeometry x="30" y="60" width="160" height="60" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="n4" label="FIR 滤波()&lt;br&gt;void FirApply()" symbolId="Dsp.cs::FirApply" kind="func" ret="void" alias="FIR 滤波">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="grp2">
+            <mxGeometry x="30" y="160" width="180" height="72" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="n5" label="设置增益()&lt;br&gt;void SetGain()" symbolId="Dsp.cs::SetGain" kind="func" ret="void" alias="设置增益">
+          <mxCell style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="grp2">
+            <mxGeometry x="30" y="272" width="180" height="72" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="n6" label="g_coeff&lt;br&gt;float[] / in / coeff" symbolId="Dsp.cs::g_coeff" kind="signal" ctype="float[]" dir="in" unit="coeff" alias="滤波系数">
+          <mxCell style="shape=path;path=0,0 115,0 160,30 115,60 0,60;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="grp2">
+            <mxGeometry x="30" y="60" width="160" height="60" as="geometry" />
+          </mxCell>
+        </object>
+        <object id="e1" label="write" rel="def-use" src="Adc.cs::AdcRead" dst="Adc.cs::g_filtered" rw="write">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="grp1" source="n1" target="n2">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="15" y="196" />
+              <mxPoint x="15" y="302" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="e2" label="read" rel="def-use" src="Adc.cs::g_raw" dst="Adc.cs::AdcRead" rw="read">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="grp1" source="n3" target="n1">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="225" y="90" />
+              <mxPoint x="225" y="196" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="e3" label="read" rel="def-use" src="Adc.cs::g_raw" dst="Dsp.cs::FirApply" rw="read">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n3" target="n4">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="120" />
+              <mxPoint x="300" y="226" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="e4" label="write" rel="def-use" src="Dsp.cs::FirApply" dst="Adc.cs::g_filtered" rw="write">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="n4" target="n2">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="300" y="226" />
+              <mxPoint x="300" y="332" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="e5" label="write" rel="def-use" src="Dsp.cs::SetGain" dst="Dsp.cs::g_coeff" rw="write">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="grp2" source="n5" target="n6">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="225" y="308" />
+              <mxPoint x="225" y="90" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+        <object id="e6" label="read" rel="def-use" src="Dsp.cs::g_coeff" dst="Dsp.cs::FirApply" rw="read">
+          <mxCell style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="grp2" source="n6" target="n4">
+            <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="225" y="90" />
+              <mxPoint x="225" y="196" />
+            </Array>
+          </mxGeometry>
+          </mxCell>
+        </object>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

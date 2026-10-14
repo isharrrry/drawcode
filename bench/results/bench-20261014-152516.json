@@ -1,0 +1,46 @@
+﻿{
+    "generated_at":  "2026-10-14T15:25:17.6158370+08:00",
+    "machine":  {
+                    "cores":  8,
+                    "cpu":  "Intel(R) Core(TM) i5-10200H CPU @ 2.40GHz",
+                    "os":  "Microsoft Windows 10.0.22631 "
+                },
+    "toolchain":  {
+                      "node":  "v24.16.0",
+                      "dotnet":  "10.0.203",
+                      "python":  "Python 3.14.6"
+                  },
+    "repeat":  3,
+    "results":  [
+                    {
+                        "size":  "xl",
+                        "lang":  "python",
+                        "modules":  40,
+                        "files":  80,
+                        "median_ms":  23951.4,
+                        "min_ms":  23718.6,
+                        "ok":  true,
+                        "note":  ""
+                    },
+                    {
+                        "size":  "xl",
+                        "lang":  "typescript",
+                        "modules":  40,
+                        "files":  80,
+                        "median_ms":  791.3,
+                        "min_ms":  790.6,
+                        "ok":  true,
+                        "note":  ""
+                    },
+                    {
+                        "size":  "xl",
+                        "lang":  "dotnet",
+                        "modules":  40,
+                        "files":  80,
+                        "median_ms":  527.8,
+                        "min_ms":  520.3,
+                        "ok":  true,
+                        "note":  ""
+                    }
+                ]
+}

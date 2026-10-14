@@ -1,0 +1,34 @@
+{
+  "name": "drawcode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "drawcode (TypeScript) — source code is the single source of truth; the diagram is a derived view. Reference-equal to python/src/drawcode.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "drawcode": "./bin/drawcode.ts"
+  },
+  "files": [
+    "src",
+    "bin",
+    "SKILL.md",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "test:conformance": "node --test test/conformance.test.ts",
+    "test:unit": "node --test test/parse.test.ts test/drawio.test.ts test/codegen.test.ts test/svg.test.ts test/xml.test.ts test/xsd.test.ts test/num.test.ts test/compressed.test.ts",
+    "drawcode": "node bin/drawcode.ts",
+    "fixtures": "python tools/make-fixtures.py",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,163 @@
+{
+  "devices": [
+    {
+      "asset": "assets/ads1115.svg",
+      "id": "adc.h::adc_read",
+      "model": "ADS1115",
+      "size": "2.0x3.0mm",
+      "spec": "16bit/860SPS",
+      "vendor": "TI"
+    }
+  ],
+  "edges": [
+    {
+      "dst": "adc.h::g_filtered",
+      "rw": "write",
+      "src": "adc.h::adc_read"
+    },
+    {
+      "dst": "adc.h::adc_read",
+      "rw": "read",
+      "src": "adc.h::g_raw"
+    },
+    {
+      "dst": "dsp.h::fir_apply",
+      "rw": "read",
+      "src": "adc.h::g_raw"
+    },
+    {
+      "dst": "dsp.h::g_coeff",
+      "rw": "write",
+      "src": "dsp.h::dsp_set_gain"
+    },
+    {
+      "dst": "adc.h::g_filtered",
+      "rw": "write",
+      "src": "dsp.h::fir_apply"
+    },
+    {
+      "dst": "dsp.h::fir_apply",
+      "rw": "read",
+      "src": "dsp.h::g_coeff"
+    }
+  ],
+  "files": [
+    "adc.c",
+    "adc.h",
+    "dsp.c",
+    "dsp.h"
+  ],
+  "funcs": [
+    {
+      "alias": "ADC 采样",
+      "asset": "assets/ads1115.svg",
+      "calls": [
+        "dsp.h::fir_apply"
+      ],
+      "external": false,
+      "file": "adc.h",
+      "group": "adc",
+      "id": "adc.h::adc_read",
+      "line": 14,
+      "name": "adc_read",
+      "note": "",
+      "params": [],
+      "reads": [
+        "adc.h::g_raw"
+      ],
+      "ret": "int16_t",
+      "tooltip": "上电后需先校准",
+      "writes": [
+        "adc.h::g_filtered"
+      ]
+    },
+    {
+      "alias": "设置增益",
+      "asset": "",
+      "calls": [],
+      "external": false,
+      "file": "dsp.h",
+      "group": "dsp",
+      "id": "dsp.h::dsp_set_gain",
+      "line": 13,
+      "name": "dsp_set_gain",
+      "note": "",
+      "params": [
+        {
+          "ctype": "uint8_t",
+          "dir": "in",
+          "name": "gain"
+        }
+      ],
+      "reads": [],
+      "ret": "void",
+      "tooltip": "",
+      "writes": [
+        "dsp.h::g_coeff"
+      ]
+    },
+    {
+      "alias": "FIR 滤波",
+      "asset": "",
+      "calls": [],
+      "external": false,
+      "file": "dsp.h",
+      "group": "dsp",
+      "id": "dsp.h::fir_apply",
+      "line": 10,
+      "name": "fir_apply",
+      "note": "",
+      "params": [],
+      "reads": [
+        "adc.h::g_raw",
+        "dsp.h::g_coeff"
+      ],
+      "ret": "void",
+      "tooltip": "",
+      "writes": [
+        "adc.h::g_filtered"
+      ]
+    }
+  ],
+  "signals": [
+    {
+      "alias": "滤波输出",
+      "ctype": "int16_t",
+      "dir": "out",
+      "external": false,
+      "file": "adc.h",
+      "group": "adc",
+      "id": "adc.h::g_filtered",
+      "line": 10,
+      "name": "g_filtered",
+      "note": "",
+      "unit": "LSB"
+    },
+    {
+      "alias": "原始采样值",
+      "ctype": "int16_t",
+      "dir": "in",
+      "external": false,
+      "file": "adc.h",
+      "group": "adc",
+      "id": "adc.h::g_raw",
+      "line": 7,
+      "name": "g_raw",
+      "note": "上电后需校准",
+      "unit": "LSB"
+    },
+    {
+      "alias": "滤波系数",
+      "ctype": "float[32]",
+      "dir": "in",
+      "external": false,
+      "file": "dsp.h",
+      "group": "dsp",
+      "id": "dsp.h::g_coeff",
+      "line": 7,
+      "name": "g_coeff",
+      "note": "",
+      "unit": "coeff"
+    }
+  ]
+}
