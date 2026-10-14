@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 
 import { parseProject } from "../src/cparse.ts";
@@ -83,6 +86,39 @@ test("C: locals stay out of the graph", () => {
   }
   assert.ok(!names.has("adc.c::v"));
   assert.ok(!names.has("dsp.c::i"));
+});
+
+test("C: an annotation without dir still keeps its declaration", () => {
+  // 进 IR 的判据是「有注解」，不是「有 dir」。早先把两件事混成一件
+  // （`dirKey !== undefined`），于是 `/// @drawcode path="p"` 这种没有 dir 的注解
+  // 会让**整条声明消失**，而且不报任何错 —— 产物悄悄少节点，最难查的一类。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-parse-"));
+  try {
+    const src = [
+      '/// @drawcode path="p"',
+      "int16_t g_nodir;",
+      "",
+      '/// @drawcode dir=""',
+      "int16_t g_emptydir;",
+      "",
+      "void f(void)",
+      "{",
+      "    int local_i;",
+      "    local_i = 0;",
+      "}",
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "z.h"), src);
+    const m = parseProject([path.join(dir, "z.h")], dir);
+
+    assert.ok(m.signals.has("z.h::g_nodir"), "没有 dir 的声明被丢掉了");
+    assert.strictEqual(m.signals.get("z.h::g_nodir")?.dir, "");
+    assert.strictEqual(m.signals.get("z.h::g_nodir")?.path, "p");
+    assert.ok(m.signals.has("z.h::g_emptydir"), "空 dir 的声明被丢掉了");
+    assert.ok(!m.signals.has("z.h::local_i"), "局部变量不该进 IR");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("C: edges", () => {

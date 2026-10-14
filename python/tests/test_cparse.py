@@ -119,5 +119,55 @@ class TestEdges(unittest.TestCase):
         self.assertEqual(len(got), 6)
 
 
+class TestAnnotationIsWhatMatters(unittest.TestCase):
+    """进 IR 的判据是「有没有注解」，不是「有没有 dir」。
+
+    这两件事早先被混成一件（写成 `dirKey !== undefined`），于是
+    `/// @drawcode path="p"` 这种没有 dir 的注解会让整条声明**消失**，而且不报错。
+    TS 侧当初就是这样，产物悄悄少了节点；Python 一直是对的，所以这里钉住它。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import tempfile
+
+        cls.tmp = tempfile.mkdtemp()
+        src = (
+            '/// @drawcode path="p"\n'
+            "int16_t g_nodir;\n"
+            "\n"
+            '/// @drawcode dir=""\n'
+            "int16_t g_emptydir;\n"
+            "\n"
+            "void f(void)\n"
+            "{\n"
+            "    int local_i;\n"
+            "    local_i = 0;\n"
+            "}\n"
+        )
+        with open(os.path.join(cls.tmp, "z.h"), "w", encoding="utf-8", newline="") as fh:
+            fh.write(src)
+        cls.m = parse_project([os.path.join(cls.tmp, "z.h")], root=cls.tmp)
+
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_missing_dir_does_not_drop_the_declaration(self):
+        self.assertIn("z.h::g_nodir", self.m.signals)
+        self.assertEqual("", self.m.signals["z.h::g_nodir"].dir)
+        self.assertEqual("p", self.m.signals["z.h::g_nodir"].path)
+
+    def test_an_empty_dir_does_not_drop_the_declaration(self):
+        self.assertIn("z.h::g_emptydir", self.m.signals)
+        self.assertEqual("", self.m.signals["z.h::g_emptydir"].dir)
+
+    def test_no_annotation_means_no_signal(self):
+        """函数体里的局部变量没有注解，不能进 IR。"""
+        self.assertNotIn("z.h::local_i", self.m.signals)
+
+
 if __name__ == "__main__":
     unittest.main()

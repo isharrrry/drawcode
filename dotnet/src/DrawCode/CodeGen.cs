@@ -53,6 +53,16 @@ internal static class CodeGen
 
     private static readonly Regex CsArraySizeRe = new(@"\[\s*\d+\s*\]", RegexOptions.Compiled);
 
+    /// <summary>
+    /// 从图里接回来的信号可能没有类型（用户在节点上只写了个名字）。
+    /// 这时落一个占位类型而不是留空 —— 留空会写出一条不是声明的 <c>g_unknown;</c>，
+    /// 解析器读不回来，下一次 sync 就会把它当成新元素再追加一遍（不幂等）。
+    /// </summary>
+    private const string PlaceholderCType = "int";
+
+    /// <summary>TODO 提示，<c>%s</c> 填占位类型名。</summary>
+    private const string PlaceholderTodo = "/* drawcode: 未能从图里认出类型，暂用 %s —— 请改成实际类型 */";
+
     internal static (string Base, string Arr) SplitCType(string ctype)
     {
         var m = CTypeRe.Match(ctype.Trim());
@@ -101,12 +111,42 @@ internal static class CodeGen
         return kv.Count == 0 ? "" : "/// @drawcode " + KvText(kv);
     }
 
+    /// <summary>
+    /// 渲染「注解行 + 声明行」。无注解时只输出声明行（不留空注释）。
+    ///
+    /// 类型可能为空（元素是从图里接回来的，label 只写了名字）。这时**必须**落一个
+    /// 真实类型名，不能只写标识符本身：
+    ///
+    ///   1. 文件作用域的 <c>g_unknown;</c> 不是声明，不是合法 C；
+    ///   2. 解析器要求 <c>&lt;type&gt; &lt;name&gt;;</c>，只写名字就读不回来 —— 下一次 sync 会把
+    ///      它当成「图里新加的元素」再追加一遍，于是 sync 不幂等。
+    ///
+    /// TODO 放在**单独一行**（不是行尾），否则 SignalRe 的 <c>;$</c> 就匹配不上。
+    /// </summary>
     internal static string RenderSignal(Signal sig)
     {
-        var (baseType, arr) = SplitCType(sig.CType);
-        var line = baseType + " " + sig.Name + arr + ";";
+        var (baseRaw, arr) = SplitCType(sig.CType);
+        var untyped = baseRaw.Length == 0;
+        var baseType = untyped ? PlaceholderCType : baseRaw;
+        var line = (baseType + " " + sig.Name + arr).Trim() + ";";
         var ann = RenderAnnotation(sig);
-        return ann.Length > 0 ? ann + "\n" + line : line;
+        var body = ann.Length > 0 ? ann + "\n" + line : line;
+        return untyped ? PlaceholderTodo.Replace("%s", baseType) + "\n" + body : body;
+    }
+
+    /// <summary>
+    /// 为一个只有图形、没有源码的函数生成「签名 + 空实现」。
+    ///
+    /// 带空实现是刻意的：只给声明的话 C 侧能编译、链接时才报未定义符号，
+    /// 错误暴露得太晚；空实现让产物立刻可编译，缺口以注释形式留在原地。
+    /// </summary>
+    internal static string RenderFuncSkeleton(Func f)
+    {
+        var ret = f.Ret.Length == 0 ? "void" : f.Ret;
+        var parameters = f.Params.Count > 0
+            ? string.Join(", ", f.Params.Select(p => p.CType.Length == 0 ? p.Name : p.CType + " " + p.Name))
+            : "void";
+        return ret + " " + f.Name + "(" + parameters + ")\n{\n    /* TODO: drawcode 从图里新建，尚未实现 */\n}";
     }
 
     private static List<(string, string)> RenderFuncKv(Func func)
@@ -255,6 +295,44 @@ internal static class CodeGen
                 newLines.RemoveRange(start, end - start);
                 newLines.InsertRange(start, rendered);
             }
+        }
+
+        // 图里有、源码里还没有的函数 —— 这正是「用户在 draw.io 里新加了一个函数节点」
+        // 的情形（见 Adopt.cs）。追加到文件末尾，并带上空实现骨架，使产物仍能编译过：
+        // 只给声明的话，C 侧能编译但链接会报未定义符号。
+        var known = new HashSet<string>(spans.Select(s => s.Name), StringComparer.Ordinal);
+        var missing = funcs.Values
+            .Where(f => !known.Contains(f.Name))
+            .OrderBy(f => f.Name, StringComparer.Ordinal)
+            .ToList();
+        if (missing.Count > 0)
+        {
+            var add = new List<string>();
+            foreach (var f in missing)
+            {
+                var kv = RenderFuncKv(f);
+                if (kv.Count > 0)
+                {
+                    add.Add("/// @drawcode " + KvText(kv));
+                }
+
+                var devKv = RenderDeviceKv(model.Devices.GetValueOrDefault(f.Id));
+                if (devKv.Count > 0)
+                {
+                    add.Add("/// @device " + string.Join(" ", devKv.Select(p => p.Item1 + "=\"" + p.Item2 + "\"")));
+                }
+
+                add.Add(RenderFuncSkeleton(f));
+                add.Add("");
+            }
+
+            while (newLines.Count > 0 && newLines[^1].Trim().Length == 0)
+            {
+                newLines.RemoveAt(newLines.Count - 1);
+            }
+
+            newLines.Add("");
+            newLines.AddRange(add);
         }
 
         if (newLines.SequenceEqual(lines, StringComparer.Ordinal))

@@ -339,21 +339,60 @@ export function routeEdge(
   );
 }
 
-function groupEntities(model: Model): Map<string, Array<Signal | Func>> {
-  const groups = new Map<string, Array<Signal | Func>>();
+/**
+ * 实体的容器路径。
+ *
+ * `path` 是完整层级（`adc/采样`），`group` 是它的第一段。老实体只填了 group，
+ * 所以这里退回 group；两者都空才落到 `misc`。解析器保证 path 非空，
+ * 这个兜底是给手工构造的 model 用的。
+ */
+export function entityPath(e: Signal | Func): string {
+  return e.path || e.group || "misc";
+}
+
+export interface TreeNode {
+  members: Array<Signal | Func>;
+  children: string[];
+}
+
+/**
+ * 从所有实体的 path 推出容器树。
+ *
+ * 中间层级即使没有直属成员也会被建出来 —— `path="adc/采样"` 里那个 `adc`
+ * 必须存在，否则子容器会没有父框可挂。
+ */
+export function containerTree(model: Model): Map<string, TreeNode> {
+  const nodes = new Map<string, TreeNode>();
   for (const { ent } of entities(model)) {
-    const key = ent.group || "misc";
-    const list = groups.get(key);
-    if (list === undefined) groups.set(key, [ent]);
-    else list.push(ent);
+    const parts = entityPath(ent).split("/");
+    for (let i = 1; i <= parts.length; i++) {
+      const key = parts.slice(0, i).join("/");
+      if (!nodes.has(key)) nodes.set(key, { members: [], children: [] });
+    }
+    (nodes.get(parts.join("/")) as TreeNode).members.push(ent);
   }
-  return groups;
+  for (const p of [...nodes.keys()]) {
+    if (p.includes("/")) {
+      const parent = p.slice(0, p.lastIndexOf("/"));
+      const kids = (nodes.get(parent) as TreeNode).children;
+      if (!kids.includes(p)) kids.push(p);
+    }
+  }
+  return nodes;
+}
+
+/** 一个容器及其所有子孙的成员，展开成一维列表。*/
+export function allMembers(nodes: Map<string, TreeNode>, path: string): Array<Signal | Func> {
+  const node = nodes.get(path) as TreeNode;
+  const out = [...node.members];
+  for (const child of node.children) out.push(...allMembers(nodes, child));
+  return out;
 }
 
 /**
  * 组内排序权：输入信号靠上、输出信号靠下，中间留给无方向的实体。
  *
- * 这样整张图的数据流方向是「左上 -> 右下」，与端口三角的朝向一致。
+ * 这样整张图的数据流方向是「左上 -> 右下」，与方向五边形的尖角朝向一致。
  * 函数没有 dir 属性，取到 undefined 后落到空串，自然落在中间。
  */
 export function dirRank(e: Signal | Func): number {
@@ -365,6 +404,11 @@ export function dirRank(e: Signal | Func): number {
 
 /** 容器（泳道）的包围盒：成员节点的并集，四周各留 PAD，顶部再加 HEADER 放标题。 */
 export function containerBox(members: Array<Signal | Func>): Rect {
+  if (members.length === 0) {
+    // 中间容器（`a/b/c` 里的 `b`）只有子容器、没有直属成员，会走到这里。
+    // 少了这一条，Math.min() 取空数组得 Infinity，几何会算成字面量 "NaN" 写进文件。
+    return [0, 0, 0, 0];
+  }
   const xs = members.map((e) => e.x);
   const ys = members.map((e) => e.y);
   const x2 = members.map((e) => e.x + e.w);
@@ -379,44 +423,85 @@ export function containerBox(members: Array<Signal | Func>): Rect {
   ];
 }
 
-/** 当前坐标下每条边会自动算出的拐点，用来认出"这是生成器写的，不是人拖的"。 */
-export function autoWaypoints(model: Model): Map<string, Point[]> {
-  const groups = groupEntities(model);
-  const boxes = new Map<string, Rect>();
-  for (const [name, members] of groups) boxes.set(name, containerBox(members));
-
-  const auto = new Map<string, Point[]>();
-  for (const e of model.edges) {
-    const srcEnt = model.signals.get(e.src) ?? model.funcs.get(e.src);
-    const dstEnt = model.signals.get(e.dst) ?? model.funcs.get(e.dst);
-    const sg = srcEnt?.group || "misc";
-    const dg = dstEnt?.group || "misc";
-    const avoid = entities(model).map(({ ent }): Rect => [ent.x, ent.y, ent.w, ent.h]);
-    const gap = sg !== dg ? crossGap(boxes.get(sg) as Rect, boxes.get(dg) as Rect) : null;
-    auto.set(edgeKey(e), routeEdge(model, e, avoid, gap)[1]);
-  }
-  return auto;
+function byRankThenId(a: Signal | Func, b: Signal | Func): number {
+  return dirRank(a) - dirRank(b) || compareCodePoints(a.id, b.id);
 }
 
-/** 给没坐标的实体排初始位；容器之间做水平避让，保证不互相压住。 */
+/**
+ * 把一组实体在给定左上角垂直堆叠，返回它们的包围盒。
+ *
+ * 只对**直属成员**调用（`layoutTree` 里 `members === own` 那一支）——它们从没被
+ * 递归设过坐标，所以 `e.x === 0 && e.y === 0` 对块里每个成员都成立。带人工坐标
+ * （`@drawcode xy="…"`）的节点不受影响。
+ */
+function stack(members: Array<Signal | Func>, xLeft: number, yTop: number): Rect {
+  let y = yTop;
+  for (const e of members) {
+    if (e.x === 0 && e.y === 0) {
+      e.x = xLeft;
+      e.y = y;
+    }
+    y += e.h + GAP_Y;
+  }
+  return containerBox(members);
+}
+
+/**
+ * 递归排布一个容器：子容器各成一块，直属成员另成一块，横向依次摆开。
+ *
+ * 单层容器（没有子容器）时，这就退化成「成员垂直堆叠」—— 与老行为完全一致，
+ * 所以没有任何 `path=` 的源码产物逐字节不变。
+ */
+function layoutTree(
+  nodes: Map<string, TreeNode>,
+  path: string,
+  xLeft: number,
+  yTop: number,
+): Rect | null {
+  const node = nodes.get(path) as TreeNode;
+  const own = node.members.slice().sort(byRankThenId);
+
+  // 块宽必须按**整棵子树**算。中间容器（`a/b/c` 里的 `b`）自己没有直属成员，
+  // 若只看它的 members，宽度是 0 → 游标不前进 → 几棵子树叠在一起。
+  const blocks: Array<Array<Signal | Func>> = [];
+  for (const child of node.children.slice().sort(compareCodePoints)) {
+    layoutTree(nodes, child, 0, 0);
+    const members = allMembers(nodes, child);
+    if (members.length > 0) blocks.push(members);
+  }
+  if (own.length > 0) blocks.push(own);
+  if (blocks.length === 0) return null;
+
+  // 游标走的是**块左边界**（和 containerBox 同一基准），不是成员坐标 ——
+  // 早先把成员坐标 xLeft 和包围盒左边界 box[0] 拿来比较，两者差一个 PAD，
+  // 于是永远判定"需要平移"，把整块又推了 30。
+  let cursor = xLeft;
+  for (const members of blocks) {
+    if (members === own) {
+      stack(members, cursor, yTop);
+    } else {
+      // 子容器已经在局部坐标系里排好了，整体平移到游标即可 ——
+      // 它的子容器也在这份 members 里，所以会跟着一起走。
+      const box = containerBox(members);
+      const dx = cursor - box[0];
+      for (const e of members) e.x += dx;
+    }
+    const box = containerBox(members);
+    cursor = box[0] + box[2] + 2 * PAD + PAD;
+  }
+  return containerBox(blocks.flat());
+}
+
+/** 给没坐标的实体排初始位；顶层容器之间做水平避让，保证不互相压住。*/
 export function assignDefaultPositions(model: Model): void {
-  const groups = groupEntities(model);
+  const nodes = containerTree(model);
+  const tops = [...nodes.keys()].filter((p) => !p.includes("/")).sort(compareCodePoints);
 
   let rightEdge: number | null = null;
-  for (const gname of [...groups.keys()].sort(compareCodePoints)) {
-    const members = (groups.get(gname) as Array<Signal | Func>)
-      .slice()
-      .sort((a, b) => dirRank(a) - dirRank(b) || compareCodePoints(a.id, b.id));
-
-    let y = PAD + HEADER + PAD;
-    for (const e of members) {
-      if (e.x === 0 && e.y === 0) {
-        e.x = PAD;
-        e.y = y;
-      }
-      y += e.h + GAP_Y;
-    }
-
+  for (const gname of tops) {
+    layoutTree(nodes, gname, PAD, PAD + HEADER + PAD);
+    const members = allMembers(nodes, gname);
+    // 若这一棵树比已排好的往左，就整棵右移，避免两个顶层容器水平重叠
     let box = containerBox(members);
     if (rightEdge !== null && box[0] < rightEdge) {
       const dx = rightEdge - box[0];
@@ -425,6 +510,25 @@ export function assignDefaultPositions(model: Model): void {
     }
     rightEdge = box[0] + box[2] + 4 * PAD;
   }
+}
+
+/** 当前坐标下每条边会自动算出的拐点，用来认出"这是生成器写的，不是人拖的"。 */
+export function autoWaypoints(model: Model): Map<string, Point[]> {
+  const nodes = containerTree(model);
+  const boxes = new Map<string, Rect>();
+  for (const p of nodes.keys()) boxes.set(p, containerBox(allMembers(nodes, p)));
+
+  const auto = new Map<string, Point[]>();
+  for (const e of model.edges) {
+    const srcEnt = model.signals.get(e.src) ?? model.funcs.get(e.src);
+    const dstEnt = model.signals.get(e.dst) ?? model.funcs.get(e.dst);
+    const sg = srcEnt === undefined ? "misc" : entityPath(srcEnt);
+    const dg = dstEnt === undefined ? "misc" : entityPath(dstEnt);
+    const avoid = entities(model).map(({ ent }): Rect => [ent.x, ent.y, ent.w, ent.h]);
+    const gap = sg !== dg ? crossGap(boxes.get(sg) as Rect, boxes.get(dg) as Rect) : null;
+    auto.set(edgeKey(e), routeEdge(model, e, avoid, gap)[1]);
+  }
+  return auto;
 }
 
 export function nodeLabel(kind: EntityKind, e: Signal | Func): string {
@@ -440,18 +544,26 @@ export function nodeLabel(kind: EntityKind, e: Signal | Func): string {
 export function toDrawio(model: Model): string {
   assignDefaultPositions(model);
 
-  const groups = groupEntities(model);
-  const groupNames = [...groups.keys()].sort(compareCodePoints);
+  const nodes = containerTree(model);
+  const paths = [...nodes.keys()].sort(compareCodePoints);
   const gid = new Map<string, string>();
-  groupNames.forEach((g, i) => gid.set(g, `grp${i + 1}`));
+  paths.forEach((p, i) => gid.set(p, `grp${i + 1}`));
 
-  const origin = new Map<string, Point>();
+  // 容器 id 与原点：节点坐标在 XML 里是**相对父容器**的，所以处处要减去父的原点。
+  // 顶层容器没有父，原点就是根 (0,0) —— 单层源码因此与老版本逐位相同。
   const boxes = new Map<string, Rect>();
-  for (const g of groupNames) {
-    const box = containerBox(groups.get(g) as Array<Signal | Func>);
-    boxes.set(g, box);
-    origin.set(g, [box[0], box[1]]);
-  }
+  for (const p of paths) boxes.set(p, containerBox(allMembers(nodes, p)));
+
+  const parentPath = (p: string): string | null =>
+    p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : null;
+
+  /** 容器自己的原点 —— 它的几何是相对**父容器**写的。*/
+  const originOf = (p: string): Point => {
+    const pp = parentPath(p);
+    if (pp === null) return [0, 0];
+    const pb = boxes.get(pp) as Rect;
+    return [pb[0], pb[1]];
+  };
 
   const sorted = entities(model)
     .slice()
@@ -461,17 +573,25 @@ export function toDrawio(model: Model): string {
 
   const out: string[] = [];
 
-  for (const g of groupNames) {
-    const [ox, oy, ow, oh] = boxes.get(g) as Rect;
+  for (const p of paths) {
+    const [ox, oy, ow, oh] = boxes.get(p) as Rect;
+    const [pox, poy] = originOf(p);
+    const pp = parentPath(p);
+    // 容器显示名用 path 最后一段
+    const label = p.slice(p.lastIndexOf("/") + 1);
     out.push(
-      `        <mxCell id="${gid.get(g)}" value="${escapeHtml(g)}" style="${CONT_STYLE}" vertex="1" parent="1">\n` +
-        `          <mxGeometry x="${num(ox)}" y="${num(oy)}" width="${num(ow)}" height="${num(oh)}" as="geometry" />\n` +
+      `        <mxCell id="${gid.get(p)}" value="${escapeHtml(label)}" style="${CONT_STYLE}" vertex="1" parent="${pp === null ? "1" : gid.get(pp)}">\n` +
+        `          <mxGeometry x="${num(ox - pox)}" y="${num(oy - poy)}" width="${num(ow)}" height="${num(oh)}" as="geometry" />\n` +
         `        </mxCell>\n`,
     );
   }
 
   for (const { kind, ent } of sorted) {
-    const [ox, oy] = origin.get(ent.group || "misc") as Point;
+    const epath = entityPath(ent);
+    // 节点相对**自己的容器**，不是父容器 —— 这和容器的相对基准不同，别合并
+    const eb = boxes.get(epath) as Rect;
+    const ox = eb[0];
+    const oy = eb[1];
     const style =
       kind === "signal"
         ? (SIGNAL_DIR_STYLE[(ent as Signal).dir] ?? SIGNAL_STYLE)
@@ -516,7 +636,7 @@ export function toDrawio(model: Model): string {
 
     out.push(
       `        <object ${attrs(pairs)}>\n` +
-        `          <mxCell style="${style}" vertex="1" parent="${gid.get(ent.group || "misc")}">\n` +
+        `          <mxCell style="${style}" vertex="1" parent="${gid.get(epath)}">\n` +
         `            <mxGeometry x="${num(ent.x - ox)}" y="${num(ent.y - oy)}" width="${num(ent.w)}" height="${num(ent.h)}" as="geometry" />\n` +
         `          </mxCell>\n` +
         `        </object>\n`,
@@ -525,19 +645,21 @@ export function toDrawio(model: Model): string {
 
   const sortedEdges = model.edges.slice().sort((a, b) => compareCodePoints(edgeKey(a), edgeKey(b)));
   sortedEdges.forEach((e, i) => {
-    const srcGroup = (model.signals.get(e.src) ?? model.funcs.get(e.src))?.group as string;
-    const dstGroup = (model.signals.get(e.dst) ?? model.funcs.get(e.dst))?.group as string;
-    const parent = srcGroup === dstGroup ? (gid.get(srcGroup) as string) : "1";
-    const [ox, oy]: Point = parent !== "1" ? (origin.get(srcGroup) as Point) : [0, 0];
+    const srcEnt = model.signals.get(e.src) ?? model.funcs.get(e.src);
+    const dstEnt = model.signals.get(e.dst) ?? model.funcs.get(e.dst);
+    const srcPath = srcEnt === undefined ? "misc" : entityPath(srcEnt);
+    const dstPath = dstEnt === undefined ? "misc" : entityPath(dstEnt);
+    // 同容器内的边挂在该容器下（坐标相对容器），跨容器的边挂在根下（坐标绝对）
+    const parent = srcPath === dstPath ? (gid.get(srcPath) as string) : "1";
+    const sb = boxes.get(srcPath) as Rect;
+    const [ox, oy]: Point = parent !== "1" ? [sb[0], sb[1]] : [0, 0];
 
     let style = EDGE_STYLE;
     let waypoints: Point[] = [...e.waypoints];
     if (waypoints.length === 0) {
       const avoid = entities(model).map(({ ent }): Rect => [ent.x, ent.y, ent.w, ent.h]);
       const gap =
-        parent === "1"
-          ? crossGap(boxes.get(srcGroup) as Rect, boxes.get(dstGroup) as Rect)
-          : null;
+        parent === "1" ? crossGap(sb, boxes.get(dstPath) as Rect) : null;
       const [anchors, pts] = routeEdge(model, e, avoid, gap);
       waypoints = pts;
       if (anchors !== null) style += anchorStyle(anchors);
@@ -742,10 +864,27 @@ export function originOf(cells: Map<string, CellInfo>, cid: string | null): Poin
   return [x, y];
 }
 
+/** 图里「能看见、但不是 drawcode 节点」的顶点，供 `adopt` 接回 IR。 */
+export interface ForeignCell {
+  cell_id: string;
+  label: string;
+  style: string;
+  parent: string | null;
+  container: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface Layout {
   nodes: Map<string, Rect>;
   edges: Map<string, Point[]>;
   attrs: Map<string, Map<string, string>>;
+  /** 容器 cell id -> 容器名（= group 名 = 源文件名）。仅 `includeForeign` 时返回。 */
+  containers?: Map<string, string>;
+  /** 图里多出来的顶点。仅 `includeForeign` 时返回。 */
+  foreign?: ForeignCell[];
 }
 
 /**
@@ -753,8 +892,12 @@ export interface Layout {
  *
  * 只认带 `symbolId` 的 `<object>`（见文件头），所以手工在 draw.io 里画的图形、以及我们
  * 自己生成的方向端口（裸 `<mxCell>`）都不会被读进来。找不到 symbolId 的元素直接忽略。
+ *
+ * `includeForeign` 为 true 时另外返回 `containers` 与 `foreign` 两项，供 `adopt` 把
+ * 「用户在 draw.io 里新加的元素」接回 IR。默认不返回，因为绝大多数调用方
+ * （尤其 `--layout-from`）只关心既有节点。
  */
-export function readLayout(xml: string): Layout {
+export function readLayout(xml: string, includeForeign = false): Layout {
   const cells = loadCells(xml);
   const nodes = new Map<string, Rect>();
   const edges = new Map<string, Point[]>();
@@ -802,7 +945,63 @@ export function readLayout(xml: string): Layout {
     edges.set(`${src}->${dst}:${info.rw ?? "read"}`, pts);
   }
 
-  return { nodes, edges, attrs };
+  const result: Layout = { nodes, edges, attrs };
+  if (includeForeign) {
+    const containers = containersOf(cells);
+    result.containers = containers;
+    result.foreign = foreignCells(cells, containers);
+  }
+  return result;
+}
+
+/**
+ * 容器 cell id -> 容器名。容器名就是 group 名，也是它对应的源文件名（不含扩展名）。
+ * 判定用 `swimlane`：容器是泳道，天生没有 `symbolId`。
+ */
+function containersOf(cells: Map<string, CellInfo>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [cid, info] of cells) {
+    if (info.cell.attrib.get("vertex") === "1" && (info.cell.attrib.get("style") ?? "").includes("swimlane")) {
+      out.set(cid, (info.el.attrib.get("value") ?? "").trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * 图里「能看见、但不是 drawcode 节点」的顶点。
+ *
+ * 用户手工加元素有两种常见做法，两种都会落到这里：
+ *
+ *   * 直接拖一个形状出来 —— 裸 `<mxCell>`，没有 `symbolId`；
+ *   * 复制一个已有节点 —— 副本带着**同一个 `symbolId`**，于是被 `loadCells`
+ *     折叠到原节点上，表现为「图里多了一个但读回来没多」。
+ *
+ * 这里按 cell id 收集，所以上面第二种情况仍然能被发现：副本的 cell id 是新的。
+ */
+function foreignCells(
+  cells: Map<string, CellInfo>,
+  containers: Map<string, string>,
+): ForeignCell[] {
+  const out: ForeignCell[] = [];
+  for (const [cid, info] of cells) {
+    if (info.edge || info.symbolId !== null) continue;
+    if (containers.has(cid)) continue; // 容器本身就是 swimlane，不是用户新加的元素
+    const geom = findChild(info.cell, "mxGeometry");
+    if (geom === null) continue;
+    out.push({
+      cell_id: cid,
+      label: (info.el.attrib.get("label") ?? info.el.attrib.get("value") ?? "").trim(),
+      style: info.cell.attrib.get("style") ?? "",
+      parent: info.parent,
+      container: containers.get(info.parent ?? "") ?? "",
+      x: numericAttr(geom, "x"),
+      y: numericAttr(geom, "y"),
+      w: numericAttr(geom, "width"),
+      h: numericAttr(geom, "height"),
+    });
+  }
+  return out;
 }
 
 function samePoints(a: Point[], b: Point[]): boolean {

@@ -5,6 +5,32 @@ public class CParseTests
     private static readonly Model M = Fixture.SmallC();
 
     [Fact]
+    public void AnAnnotationWithoutDirStillKeepsItsDeclaration()
+    {
+        // 进 IR 的判据是「有注解」，不是「有 dir」。两件事混成一件时，
+        // `/// @drawcode path="p"` 这种没有 dir 的注解会让整条声明消失且不报错。
+        var m = Fixture.FromSource("z.h", """
+            /// @drawcode path="p"
+            int16_t g_nodir;
+
+            /// @drawcode dir=""
+            int16_t g_emptydir;
+
+            void f(void)
+            {
+                int local_i;
+                local_i = 0;
+            }
+            """);
+
+        Assert.True(m.Signals.ContainsKey("z.h::g_nodir"), "没有 dir 的声明被丢掉了");
+        Assert.Equal("", m.Signals["z.h::g_nodir"].Dir);
+        Assert.Equal("p", m.Signals["z.h::g_nodir"].Path);
+        Assert.True(m.Signals.ContainsKey("z.h::g_emptydir"), "空 dir 的声明被丢掉了");
+        Assert.False(m.Signals.ContainsKey("z.h::local_i"), "局部变量不该进 IR");
+    }
+
+    [Fact]
     public void SignalSetAndDirections()
     {
         Assert.Equal(

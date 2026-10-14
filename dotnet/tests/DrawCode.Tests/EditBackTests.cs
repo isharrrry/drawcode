@@ -185,13 +185,14 @@ public class EditBackTests
             var svg = Path.Combine(dir, "flow.svg");
             var args = new List<string> { "build" };
             args.AddRange(paths);
-            args.AddRange(["--root", dir, "--out", drawio, "--svg", svg]);
+            // 两个模块要合成一张图才有「一个 --out / 一个 SVG」可言 —— 默认是一模块一张图
+            args.AddRange(["--root", dir, "--merge", "--out", drawio, "--svg", svg]);
             Assert.Equal(0, Cli.Run([.. args]));
 
             var drawio2 = Path.Combine(dir, "flow2.drawio");
             var args2 = new List<string> { "build" };
             args2.AddRange(paths);
-            args2.AddRange(["--root", dir, "--out", drawio2, "--layout-from", drawio]);
+            args2.AddRange(["--root", dir, "--merge", "--out", drawio2, "--layout-from", drawio]);
             Assert.Equal(0, Cli.Run([.. args2]));
 
             Assert.Equal(Text.ReadSource(drawio), Text.ReadSource(drawio2));
@@ -212,7 +213,7 @@ public class EditBackTests
             var drawio = Path.Combine(dir, "flow.drawio");
             var build = new List<string> { "build" };
             build.AddRange(paths);
-            build.AddRange(["--root", dir, "--out", drawio]);
+            build.AddRange(["--root", dir, "--merge", "--out", drawio]);
             Assert.Equal(0, Cli.Run([.. build]));
 
             var before = Fixture.Read(Path.Combine(dir, "adc.h"));

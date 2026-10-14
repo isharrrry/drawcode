@@ -26,6 +26,15 @@ const CTYPE_RE = /^(?<base>.+?)(?<arr>\[[^\]]*\])?$/;
 
 const DIR_KEY: Record<string, string> = { in: "in", out: "out", inout: "io" };
 
+/**
+ * 从图里接回来的信号可能没有类型（用户在节点上只写了个名字）。
+ * 这时落一个占位类型而不是留空 —— 留空会写出一条不是声明的 `g_unknown;`，
+ * 解析器读不回来，下一次 sync 就会把它当成新元素再追加一遍（不幂等）。
+ * `%s` 由 PLACEHOLDER_TODO 填充。
+ */
+const PLACEHOLDER_CTYPE = "int";
+const PLACEHOLDER_TODO = "/* drawcode: 未能从图里认出类型，暂用 %s —— 请改成实际类型 */";
+
 export function splitCtype(ctype: string): [string, string] {
   const m = matchAt(CTYPE_RE, ctype.trim());
   if (m === null) return [ctype.trim(), ""];
@@ -51,10 +60,39 @@ export function renderAnnotation(sig: Signal): string {
  *
  * 注意 C 侧的数组写法是 `T name[N]`，所以 ctype 要拆成「基类型 + 方括号部分」再拼回去
  * （C# 侧写法不同，见 renderCsAnnotation）。
+ *
+ * 类型可能为空（元素是从图里接回来的，label 只写了名字）。这时**必须**落一个
+ * 真实类型名，不能只写标识符本身：
+ *
+ *   1. 文件作用域的 `g_unknown;` 不是声明，不是合法 C；
+ *   2. 解析器要求 `<type> <name>;`，只写名字就读不回来 —— 下一次 sync 会把
+ *      它当成「图里新加的元素」再追加一遍，于是 sync 不幂等。
+ *
+ * TODO 放在**单独一行**（不是行尾），否则 SIGNAL_RE 的 `;$` 就匹配不上。
  */
 export function renderSignal(sig: Signal): string {
-  const [base, arr] = splitCtype(sig.ctype);
-  return `${renderAnnotation(sig)}\n${base} ${sig.name}${arr};`;
+  const [baseRaw, arr] = splitCtype(sig.ctype);
+  const untyped = baseRaw === "";
+  const base = untyped ? PLACEHOLDER_CTYPE : baseRaw;
+  const line = `${base} ${sig.name}${arr}`.trim() + ";";
+  const ann = renderAnnotation(sig);
+  const out = ann === "" ? line : `${ann}\n${line}`;
+  return untyped ? `${PLACEHOLDER_TODO.replace("%s", base)}\n${out}` : out;
+}
+
+/**
+ * 为一个只有图形、没有源码的函数生成「签名 + 空实现」。
+ *
+ * 带空实现是刻意的：只给声明的话 C 侧能编译、链接时才报未定义符号，
+ * 错误暴露得太晚；空实现让产物立刻可编译，缺口以注释形式留在原地。
+ */
+export function renderFuncSkeleton(f: Func): string {
+  const ret = f.ret === "" ? "void" : f.ret;
+  const params =
+    f.params.length > 0
+      ? f.params.map((p) => (p.ctype === "" ? p.name : `${p.ctype} ${p.name}`)).join(", ")
+      : "void";
+  return `${ret} ${f.name}(${params})\n{\n    /* TODO: drawcode 从图里新建，尚未实现 */\n}`;
 }
 
 export function renderFuncKv(func: Func): Array<[string, string]> {
@@ -147,6 +185,30 @@ export function syncFunctions(path: string, model: Model, rel: string): boolean 
     if (block.length !== rendered.length || block.some((l, i) => l !== rendered[i])) {
       newLines.splice(start, end - start, ...rendered);
     }
+  }
+
+  // 图里有、源码里还没有的函数 —— 这正是「用户在 draw.io 里新加了一个函数节点」
+  // 的情形（见 adopt.ts）。追加到文件末尾，并带上空实现骨架，使产物仍能编译过：
+  // 只给声明的话，C 侧能编译但链接会报未定义符号。
+  const known = new Set(spans.map((s) => s[2]));
+  const missing = [...funcs.values()].filter((f) => !known.has(f.name));
+  if (missing.length > 0) {
+    const add: string[] = [];
+    for (const f of missing.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const kv = renderFuncKv(f);
+      if (kv.length > 0) add.push(`/// @drawcode ${kvLine(kv)}`);
+      const devKv = renderDeviceKv(model.devices.get(f.id));
+      if (devKv.length > 0) {
+        add.push(`/// @device ${devKv.map(([k, v]) => `${k}="${v}"`).join(" ")}`);
+      }
+      add.push(renderFuncSkeleton(f));
+      add.push("");
+    }
+    while (newLines.length > 0 && (newLines[newLines.length - 1] as string).trim() === "") {
+      newLines.pop();
+    }
+    newLines.push("");
+    newLines.push(...add);
   }
 
   if (newLines.length === lines.length && newLines.every((l, i) => l === lines[i])) return false;

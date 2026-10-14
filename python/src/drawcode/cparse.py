@@ -65,8 +65,23 @@ def _rel(path, root):
 
 
 def _stem(rel):
-    """文件名（去扩展名）——同时用作节点的分组名，即图中的「容器」。"""
+    """文件名（去扩展名）——没标 ``path`` 时的默认容器名。"""
     return os.path.splitext(os.path.basename(rel))[0]
+
+
+def _container_path(meta, rel):
+    """容器的斜杠路径，例如 ``adc/采样前端``。
+
+    标了 ``path="adc/采样前端"`` 就用它；没标则退回模块名（``adc.h`` -> ``adc``）。
+    这样旧源码一个字不改也照常工作，而且下游拿到的 path **永远非空** ——
+    「没标」和「标成空」是同一种情况，不需要在别处再判一次。
+    """
+    return (meta.get("path") or "").strip().strip("/") or _stem(rel)
+
+
+def _top_group(path):
+    """path 的第一段，即最外层容器名。"""
+    return path.split("/")[0]
 
 
 def _read_annotations(buf):
@@ -244,6 +259,7 @@ def parse_project(paths, root=None):
 
     for rel, lineno, direction, ctype, name, meta in raw_signals:
         sid = "%s::%s" % (rel, name)
+        cpath = _container_path(meta, rel)
         model.add_signal(
             Signal(
                 id=sid,
@@ -256,7 +272,8 @@ def parse_project(paths, root=None):
                 alias=meta.get("alias", ""),
                 note=meta.get("note", ""),
                 external=meta.get("external", "") == "true",
-                group=_stem(rel),
+                group=_top_group(cpath),
+                path=cpath,
             )
         )
 
@@ -267,6 +284,7 @@ def parse_project(paths, root=None):
         fid = "%s::%s" % (info["rel"], name)
         funcs_by_name[name] = fid
         meta = info.get("meta", {})
+        fpath = _container_path(meta, info["rel"])
         model.add_func(
             Func(
                 id=fid,
@@ -280,7 +298,8 @@ def parse_project(paths, root=None):
                 tooltip=meta.get("tooltip", ""),
                 asset=meta.get("asset", ""),
                 external=meta.get("external", "") == "true",
-                group=_stem(info["rel"]),
+                group=_top_group(fpath),
+                path=fpath,
             )
         )
         # 下面两个 size 是**同名但无关的两个键**，别合并：

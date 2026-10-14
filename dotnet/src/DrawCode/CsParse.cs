@@ -230,6 +230,7 @@ internal static class CsParse
 
         foreach (var (rel, lineno, direction, ctype, name, meta) in rawSignals)
         {
+            var cpath = CParse.ContainerPath(meta, rel);
             model.AddSignal(new Signal
             {
                 Id = rel + "::" + name,
@@ -242,7 +243,8 @@ internal static class CsParse
                 Alias = meta.GetValueOrDefault("alias", ""),
                 Note = meta.GetValueOrDefault("note", ""),
                 External = meta.GetValueOrDefault("external", "") == "true",
-                Group = CParse.Stem(rel),
+                Group = CParse.TopGroup(cpath),
+                Path = cpath,
             });
         }
 
@@ -258,6 +260,7 @@ internal static class CsParse
             var fid = info.Rel + "::" + name;
             funcsByName[name] = fid;
             var meta = info.Meta;
+            var fpath = CParse.ContainerPath(meta, info.Rel);
             model.AddFunc(new Func
             {
                 Id = fid,
@@ -271,7 +274,8 @@ internal static class CsParse
                 Tooltip = meta.GetValueOrDefault("tooltip", ""),
                 Asset = meta.GetValueOrDefault("asset", ""),
                 External = meta.GetValueOrDefault("external", "") == "true",
-                Group = CParse.Stem(info.Rel),
+                Group = CParse.TopGroup(fpath),
+                Path = fpath,
             });
 
             var dev = info.Device;

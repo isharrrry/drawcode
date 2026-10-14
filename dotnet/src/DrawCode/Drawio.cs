@@ -376,17 +376,91 @@ internal static class Drawio
             ConnSide(model, e.Src),
             ConnSide(model, e.Dst));
 
+    /// <summary>
+    /// 实体的容器路径。
+    ///
+    /// <c>Path</c> 是完整层级（<c>adc/采样</c>），<c>Group</c> 是它的第一段。老实体只填了
+    /// group，所以这里退回 group；两者都空才落到 <c>misc</c>。解析器保证 path 非空，
+    /// 这个兜底是给手工构造的 model 用的。
+    /// </summary>
+    internal static string EntityPath(INode e) =>
+        e.Path.Length > 0 ? e.Path : (e.Group.Length > 0 ? e.Group : "misc");
+
+    internal sealed class TreeNode
+    {
+        public List<INode> Members { get; } = [];
+        public List<string> Children { get; } = [];
+    }
+
+    /// <summary>
+    /// 从所有实体的 path 推出容器树。
+    ///
+    /// 中间层级即使没有直属成员也会被建出来 —— <c>path="adc/采样"</c> 里那个 <c>adc</c>
+    /// 必须存在，否则子容器会没有父框可挂。
+    /// </summary>
+    internal static Dictionary<string, TreeNode> ContainerTree(Model model)
+    {
+        var nodes = new Dictionary<string, TreeNode>(StringComparer.Ordinal);
+        foreach (var (_, e) in Entities(model))
+        {
+            var parts = EntityPath(e).Split('/');
+            for (var i = 1; i <= parts.Length; i++)
+            {
+                var key = string.Join("/", parts.Take(i));
+                if (!nodes.ContainsKey(key))
+                {
+                    nodes[key] = new TreeNode();
+                }
+            }
+
+            nodes[string.Join("/", parts)].Members.Add(e);
+        }
+
+        foreach (var p in nodes.Keys.ToList())
+        {
+            var slash = p.LastIndexOf('/');
+            if (slash < 0)
+            {
+                continue;
+            }
+
+            var parent = p[..slash];
+            var kids = nodes[parent].Children;
+            if (!kids.Contains(p, StringComparer.Ordinal))
+            {
+                kids.Add(p);
+            }
+        }
+
+        return nodes;
+    }
+
+    /// <summary>一个容器及其所有子孙的成员，展开成一维列表。</summary>
+    internal static List<INode> AllMembers(Dictionary<string, TreeNode> nodes, string path)
+    {
+        var output = new List<INode>(nodes[path].Members);
+        foreach (var child in nodes[path].Children)
+        {
+            output.AddRange(AllMembers(nodes, child));
+        }
+
+        return output;
+    }
+
     /// <summary>按当前坐标算出的拐点；用来区分"生成器写的"和"人工拖过的"。</summary>
     internal static Dictionary<string, List<(double X, double Y)>> AutoWaypoints(Model model)
     {
-        var groups = GroupEntities(model);
-        var boxes = groups.ToDictionary(g => g.Key, g => ContainerBox(g.Value), StringComparer.Ordinal);
+        var nodes = ContainerTree(model);
+        var boxes = nodes.Keys.ToDictionary(
+            p => p,
+            p => ContainerBox(AllMembers(nodes, p)),
+            StringComparer.Ordinal);
 
         var auto = new Dictionary<string, List<(double X, double Y)>>(StringComparer.Ordinal);
         foreach (var e in model.Edges)
         {
-            var sg = Node(model, e.Src).Group is { Length: > 0 } g1 ? g1 : "misc";
-            var dg = Node(model, e.Dst).Group is { Length: > 0 } g2 ? g2 : "misc";
+            var sg = EntityPath(Node(model, e.Src));
+            var dg = EntityPath(Node(model, e.Dst));
             var avoid = Entities(model).Select(t => (t.Node.X, t.Node.Y, t.Node.W, t.Node.H)).ToList();
             var gap = sg != dg ? CrossGap(boxes[sg], boxes[dg]) : null;
             auto[EdgeKey(e)] = RouteEdge(model, e, avoid, gap).Waypoints;
@@ -415,30 +489,115 @@ internal static class Drawio
         return 1;
     }
 
-    /// <summary>初始排布：容器内纵向堆叠，容器之间做水平避让，保证互不压住。</summary>
-    internal static void AssignDefaultPositions(Model model)
+    private static int ByRankThenId(INode a, INode b)
     {
-        var groups = GroupEntities(model);
+        var r = DirRank(a).CompareTo(DirRank(b));
+        return r != 0 ? r : string.CompareOrdinal(a.Id, b.Id);
+    }
 
-        double? rightEdge = null;
-        foreach (var gname in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+    /// <summary>
+    /// 把一组实体在给定左上角垂直堆叠，返回它们的包围盒。
+    ///
+    /// <c>e.X == 0 &amp;&amp; e.Y == 0</c> 是「这个节点还没有坐标」的约定 —— 带着人工坐标
+    /// （<c>@drawcode xy="…"</c>）的节点不受影响。
+    ///
+    /// 只对<b>直属成员</b>调用（<c>LayoutTree</c> 里 <c>members == own</c> 那一支）——
+    /// 它们从没被递归设过坐标，所以守卫对块里每个成员都成立。
+    /// </summary>
+    private static (double X, double Y, double W, double H) Stack(List<INode> members, double xLeft, double yTop)
+    {
+        var y = yTop;
+        foreach (var e in members)
         {
-            var members = groups[gname]
-                .OrderBy(DirRank)
-                .ThenBy(e => e.Id, StringComparer.Ordinal)
-                .ToList();
-            var y = Pad + Header + Pad;
-            foreach (var e in members)
+            if (e.X == 0 && e.Y == 0)
             {
-                if (e.X == 0 && e.Y == 0)
-                {
-                    e.X = Pad;
-                    e.Y = y;
-                }
-
-                y += e.H + GapY;
+                e.X = xLeft;
+                e.Y = y;
             }
 
+            y += e.H + GapY;
+        }
+
+        return ContainerBox(members);
+    }
+
+    /// <summary>
+    /// 递归排布一个容器：子容器各成一块，直属成员另成一块，横向依次摆开。
+    ///
+    /// 单层容器（没有子容器）时，这就退化成「成员垂直堆叠」—— 与老行为完全一致，
+    /// 所以没有任何 <c>path=</c> 的源码产物逐字节不变。
+    /// </summary>
+    private static (double X, double Y, double W, double H)? LayoutTree(
+        Dictionary<string, TreeNode> nodes, string path, double xLeft, double yTop)
+    {
+        var node = nodes[path];
+        var own = node.Members.OrderBy(e => e, Comparer<INode>.Create(ByRankThenId)).ToList();
+
+        // 块宽必须按**整棵子树**算。中间容器（`a/b/c` 里的 `b`）自己没有直属成员，
+        // 若只看它的 Members，宽度是 0 → 游标不前进 → 几棵子树叠在一起。
+        var blocks = new List<List<INode>>();
+        foreach (var child in node.Children.OrderBy(c => c, StringComparer.Ordinal))
+        {
+            LayoutTree(nodes, child, 0, 0);
+            var members = AllMembers(nodes, child);
+            if (members.Count > 0)
+            {
+                blocks.Add(members);
+            }
+        }
+
+        if (own.Count > 0)
+        {
+            blocks.Add(own);
+        }
+
+        if (blocks.Count == 0)
+        {
+            return null;
+        }
+
+        // 游标走的是**块左边界**（和 ContainerBox 同一基准），不是成员坐标 ——
+        // 早先把成员坐标 xLeft 和包围盒左边界 box.X 拿来比较，两者差一个 PAD，
+        // 于是永远判定"需要平移"，把整块又推了 30。
+        var cursor = xLeft;
+        foreach (var members in blocks)
+        {
+            if (ReferenceEquals(members, own))
+            {
+                Stack(members, cursor, yTop);
+            }
+            else
+            {
+                // 子容器已经在局部坐标系里排好了，整体平移到游标即可 ——
+                // 它的子容器也在这份 members 里，所以会跟着一起走。
+                var sub = ContainerBox(members);
+                var dx = cursor - sub.X;
+                foreach (var e in members)
+                {
+                    e.X += dx;
+                }
+            }
+
+            var box = ContainerBox(members);
+            cursor = box.X + box.W + (2 * Pad) + Pad;
+        }
+
+        return ContainerBox(blocks.SelectMany(b => b).ToList());
+    }
+
+    /// <summary>初始排布：容器内纵向堆叠，顶层容器之间做水平避让，保证互不压住。</summary>
+    internal static void AssignDefaultPositions(Model model)
+    {
+        var nodes = ContainerTree(model);
+        var tops = nodes.Keys.Where(p => !p.Contains('/')).OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        double? rightEdge = null;
+        foreach (var gname in tops)
+        {
+            LayoutTree(nodes, gname, Pad, Pad + Header + Pad);
+            var members = AllMembers(nodes, gname);
+
+            // 若这一棵树比已排好的往左，就整棵右移，避免两个顶层容器水平重叠
             var box = ContainerBox(members);
             if (rightEdge is not null && box.X < rightEdge.Value)
             {
@@ -455,26 +614,15 @@ internal static class Drawio
         }
     }
 
-    internal static Dictionary<string, List<INode>> GroupEntities(Model model)
-    {
-        var groups = new Dictionary<string, List<INode>>(StringComparer.Ordinal);
-        foreach (var (_, e) in Entities(model))
-        {
-            var key = e.Group.Length > 0 ? e.Group : "misc";
-            if (!groups.TryGetValue(key, out var list))
-            {
-                list = [];
-                groups[key] = list;
-            }
-
-            list.Add(e);
-        }
-
-        return groups;
-    }
-
     internal static (double X, double Y, double W, double H) ContainerBox(IReadOnlyList<INode> members)
     {
+        if (members.Count == 0)
+        {
+            // 中间容器（`a/b/c` 里的 `b`）只有子容器、没有直属成员，会走到这里。
+            // 少了这一条，minX/maxX 保持 MaxValue/MinValue，会返回天文数字量级的负宽度。
+            return (0, 0, 0, 0);
+        }
+
         var minX = double.MaxValue;
         var minY = double.MaxValue;
         var maxX = double.MinValue;
@@ -518,22 +666,34 @@ internal static class Drawio
     public static string ToDrawio(Model model)
     {
         AssignDefaultPositions(model);
-        var groups = GroupEntities(model);
+        var nodes = ContainerTree(model);
+        var paths = nodes.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
 
         var gid = new Dictionary<string, string>(StringComparer.Ordinal);
-        var i = 0;
-        foreach (var g in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        for (var n = 0; n < paths.Count; n++)
         {
-            gid[g] = "grp" + (++i).ToString(CultureInfo.InvariantCulture);
+            gid[paths[n]] = "grp" + (n + 1).ToString(CultureInfo.InvariantCulture);
         }
 
-        var origin = new Dictionary<string, (double X, double Y)>(StringComparer.Ordinal);
+        // 容器 id 与原点：节点坐标在 XML 里是**相对父容器**的，所以处处要减去父的原点。
+        // 顶层容器没有父，原点就是根 (0,0) —— 单层源码因此与老版本逐位相同。
         var boxes = new Dictionary<string, (double X, double Y, double W, double H)>(StringComparer.Ordinal);
-        foreach (var g in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        foreach (var p in paths)
         {
-            var box = ContainerBox(groups[g]);
-            boxes[g] = box;
-            origin[g] = (box.X, box.Y);
+            boxes[p] = ContainerBox(AllMembers(nodes, p));
+        }
+
+        static string? ParentPath(string p)
+        {
+            var slash = p.LastIndexOf('/');
+            return slash < 0 ? null : p[..slash];
+        }
+
+        // 容器自己的原点 —— 它的几何是相对**父容器**写的。
+        (double X, double Y) OriginOf(string p)
+        {
+            var pp = ParentPath(p);
+            return pp is null ? (0.0, 0.0) : (boxes[pp].X, boxes[pp].Y);
         }
 
         var ordered = Entities(model).OrderBy(t => t.Node.Id, StringComparer.Ordinal).ToList();
@@ -545,15 +705,19 @@ internal static class Drawio
 
         var sb = new StringBuilder();
 
-        foreach (var g in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        foreach (var p in paths)
         {
-            var (ox, oy, ow, oh) = boxes[g];
-            sb.Append("        <mxCell id=\"").Append(gid[g])
-              .Append("\" value=\"").Append(Text.HtmlEscape(g))
+            var (ox, oy, ow, oh) = boxes[p];
+            var (pox, poy) = OriginOf(p);
+            var pp = ParentPath(p);
+            // 容器显示名用 path 最后一段
+            var label = p[(p.LastIndexOf('/') + 1)..];
+            sb.Append("        <mxCell id=\"").Append(gid[p])
+              .Append("\" value=\"").Append(Text.HtmlEscape(label))
               .Append("\" style=\"").Append(ContStyle)
-              .Append("\" vertex=\"1\" parent=\"1\">\n")
-              .Append("          <mxGeometry x=\"").Append(Text.Num(ox))
-              .Append("\" y=\"").Append(Text.Num(oy))
+              .Append("\" vertex=\"1\" parent=\"").Append(pp is null ? "1" : gid[pp]).Append("\">\n")
+              .Append("          <mxGeometry x=\"").Append(Text.Num(ox - pox))
+              .Append("\" y=\"").Append(Text.Num(oy - poy))
               .Append("\" width=\"").Append(Text.Num(ow))
               .Append("\" height=\"").Append(Text.Num(oh))
               .Append("\" as=\"geometry\" />\n")
@@ -562,7 +726,9 @@ internal static class Drawio
 
         foreach (var (kind, e) in ordered)
         {
-            var (ox, oy) = origin[e.Group.Length > 0 ? e.Group : "misc"];
+            var epath = EntityPath(e);
+            // 节点相对**自己的容器**，不是父容器 —— 这和容器的相对基准不同，别合并
+            var (ox, oy) = (boxes[epath].X, boxes[epath].Y);
             var style = kind == "signal"
                 ? ((Signal)e).Dir switch
                 {
@@ -595,7 +761,7 @@ internal static class Drawio
 
             sb.Append("        <object ").Append(Attrs(pairs)).Append(">\n")
               .Append("          <mxCell style=\"").Append(style)
-              .Append("\" vertex=\"1\" parent=\"").Append(gid[e.Group.Length > 0 ? e.Group : "misc"]).Append("\">\n")
+              .Append("\" vertex=\"1\" parent=\"").Append(gid[epath]).Append("\">\n")
               .Append("            <mxGeometry x=\"").Append(Text.Num(e.X - ox))
               .Append("\" y=\"").Append(Text.Num(e.Y - oy))
               .Append("\" width=\"").Append(Text.Num(e.W))
@@ -609,18 +775,17 @@ internal static class Drawio
         for (var n = 0; n < edges.Count; n++)
         {
             var e = edges[n];
-            var srcGroup = Node(model, e.Src).Group;
-            var dstGroup = Node(model, e.Dst).Group;
-            var parent = srcGroup == dstGroup ? gid[srcGroup.Length > 0 ? srcGroup : "misc"] : "1";
-            var (ox, oy) = parent != "1" ? origin[srcGroup.Length > 0 ? srcGroup : "misc"] : (0.0, 0.0);
+            var srcPath = EntityPath(Node(model, e.Src));
+            var dstPath = EntityPath(Node(model, e.Dst));
+            // 同容器内的边挂在该容器下（坐标相对容器），跨容器的边挂在根下（坐标绝对）
+            var parent = srcPath == dstPath ? gid[srcPath] : "1";
+            var (ox, oy) = parent != "1" ? (boxes[srcPath].X, boxes[srcPath].Y) : (0.0, 0.0);
             var style = EdgeStyle;
             var waypoints = new List<(double X, double Y)>(e.Waypoints);
             if (waypoints.Count == 0)
             {
                 var avoid = Entities(model).Select(t => (t.Node.X, t.Node.Y, t.Node.W, t.Node.H)).ToList();
-                var gap = parent == "1"
-                    ? CrossGap(boxes[srcGroup.Length > 0 ? srcGroup : "misc"], boxes[dstGroup.Length > 0 ? dstGroup : "misc"])
-                    : null;
+                var gap = parent == "1" ? CrossGap(boxes[srcPath], boxes[dstPath]) : null;
                 var (anchors, pts) = RouteEdge(model, e, avoid, gap);
                 waypoints = pts;
                 if (anchors is not null)
@@ -869,6 +1034,20 @@ internal static class Drawio
             : double.Parse(raw, NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
+    /// <summary>图里「能看见、但不是 drawcode 节点」的顶点，供 <see cref="Adopt"/> 接回 IR。</summary>
+    public sealed class ForeignCell
+    {
+        public string CellId { get; init; } = "";
+        public string Label { get; init; } = "";
+        public string Style { get; init; } = "";
+        public string? Parent { get; init; }
+        public string Container { get; init; } = "";
+        public double X { get; init; }
+        public double Y { get; init; }
+        public double W { get; init; }
+        public double H { get; init; }
+    }
+
     public sealed class Layout
     {
         public Dictionary<string, (double X, double Y, double W, double H)> Nodes { get; } = new(StringComparer.Ordinal);
@@ -876,9 +1055,20 @@ internal static class Drawio
         public Dictionary<string, List<(double X, double Y)>> Edges { get; } = new(StringComparer.Ordinal);
 
         public Dictionary<string, Dictionary<string, string>> Attrs { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>容器 cell id -> 容器名（= group 名 = 源文件名）。仅 <c>includeForeign</c> 时填充。</summary>
+        public Dictionary<string, string> Containers { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>图里多出来的顶点。仅 <c>includeForeign</c> 时填充。</summary>
+        public List<ForeignCell> Foreign { get; } = new();
     }
 
-    public static Layout ReadLayout(string xml)
+    /// <param name="includeForeign">
+    /// true 时另外填充 <c>Containers</c> 与 <c>Foreign</c>，供 <see cref="Adopt"/> 把
+    /// 「用户在 draw.io 里新加的元素」接回 IR。默认 false，因为绝大多数调用方
+    /// （尤其 <c>--layout-from</c>）只关心既有节点。
+    /// </param>
+    public static Layout ReadLayout(string xml, bool includeForeign = false)
     {
         var cells = LoadCells(xml);
         var layout = new Layout();
@@ -952,7 +1142,79 @@ internal static class Drawio
             layout.Edges[src + "->" + dst + ":" + (info.Rw ?? "read")] = pts;
         }
 
+        if (includeForeign)
+        {
+            ContainersOf(cells, layout.Containers);
+            ForeignCells(cells, layout.Containers, layout.Foreign);
+        }
+
         return layout;
+    }
+
+    /// <summary>
+    /// 容器 cell id -> 容器名。容器名就是 group 名，也是它对应的源文件名（不含扩展名）。
+    /// 判定用 <c>swimlane</c>：容器是泳道，天生没有 <c>symbolId</c>。
+    /// </summary>
+    private static void ContainersOf(Dictionary<string, Cell> cells, Dictionary<string, string> into)
+    {
+        foreach (var (cid, info) in cells)
+        {
+            if (info.CellElement.Attribute("vertex")?.Value == "1" &&
+                (info.CellElement.Attribute("style")?.Value ?? "").Contains("swimlane", StringComparison.Ordinal))
+            {
+                into[cid] = (info.Element.Attribute("value")?.Value ?? "").Trim();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 图里「能看见、但不是 drawcode 节点」的顶点。
+    ///
+    /// 用户手工加元素有两种常见做法，两种都会落到这里：
+    /// <list type="bullet">
+    /// <item>直接拖一个形状出来 —— 裸 <c>mxCell</c>，没有 <c>symbolId</c>；</item>
+    /// <item>复制一个已有节点 —— 副本带着<b>同一个 <c>symbolId</c></b>，于是被
+    /// <see cref="LoadCells"/> 折叠到原节点上，表现为「图里多了一个但读回来没多」。</item>
+    /// </list>
+    /// 这里按 cell id 收集，所以上面第二种情况仍然能被发现：副本的 cell id 是新的。
+    /// </summary>
+    private static void ForeignCells(
+        Dictionary<string, Cell> cells,
+        Dictionary<string, string> containers,
+        List<ForeignCell> into)
+    {
+        foreach (var (cid, info) in cells)
+        {
+            if (info.IsEdge || info.SymbolId is not null)
+            {
+                continue;
+            }
+
+            if (containers.ContainsKey(cid))
+            {
+                continue; // 容器本身就是 swimlane，不是用户新加的元素
+            }
+
+            var geom = info.CellElement.Elements().FirstOrDefault(g => g.Name.LocalName == "mxGeometry");
+            if (geom is null)
+            {
+                continue;
+            }
+
+            var label = info.Element.Attribute("label")?.Value ?? info.Element.Attribute("value")?.Value ?? "";
+            into.Add(new ForeignCell
+            {
+                CellId = cid,
+                Label = label.Trim(),
+                Style = info.CellElement.Attribute("style")?.Value ?? "",
+                Parent = info.Parent,
+                Container = info.Parent is not null && containers.TryGetValue(info.Parent, out var cname) ? cname : "",
+                X = AttrNum(geom, "x"),
+                Y = AttrNum(geom, "y"),
+                W = AttrNum(geom, "width"),
+                H = AttrNum(geom, "height"),
+            });
+        }
     }
 
     public static Model ApplyLayout(Model model, Layout layout)

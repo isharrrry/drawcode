@@ -33,6 +33,10 @@ class Signal:
     note: str = ""
     external: bool = False
     group: str = ""
+    # 容器层级，`adc/采样前端` 这样的斜杠路径。空串表示「没标」，此时解析器会
+    # 把它归一化成模块名（`adc.h` -> `adc`），所以下游拿到的 path 永远非空。
+    # `group` 始终等于 path 的第一段，是给「只关心顶层容器」的旧代码用的。
+    path: str = ""
     x: float = 0.0
     y: float = 0.0
     w: float = 160.0
@@ -68,6 +72,7 @@ class Func:
     asset: str = ""
     external: bool = False
     group: str = ""
+    path: str = ""
     reads: list = field(default_factory=list)
     writes: list = field(default_factory=list)
     calls: list = field(default_factory=list)

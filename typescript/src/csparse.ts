@@ -16,8 +16,8 @@
  *     别与 `[Device]` 上的 `size` 混淆 —— 那是器件物理封装尺寸，是两侧都读的**另一个同名键**。
  */
 
-import { defUse, loadSources, parseParams } from "./cparse.ts";
-import { abspath, countOccurrences, dirname, stem } from "./fsutil.ts";
+import { containerPath, defUse, loadSources, parseParams, topGroup } from "./cparse.ts";
+import { abspath, countOccurrences, dirname } from "./fsutil.ts";
 import type { Func, Param } from "./model.ts";
 import { Model, makeDevice, makeFunc, makeSignal } from "./model.ts";
 import { matchAt } from "./regex.ts";
@@ -200,6 +200,7 @@ export function parseCsProject(paths: string[], root?: string): Model {
   }
 
   for (const rs of rawSignals) {
+    const cpath = containerPath(rs.meta, rs.rel);
     model.addSignal(
       makeSignal({
         id: `${rs.rel}::${rs.name}`,
@@ -212,7 +213,8 @@ export function parseCsProject(paths: string[], root?: string): Model {
         alias: rs.meta.get("alias") ?? "",
         note: rs.meta.get("note") ?? "",
         external: rs.meta.get("external") === "true",
-        group: stem(rs.rel),
+        group: topGroup(cpath),
+        path: cpath,
       }),
     );
   }
@@ -224,6 +226,7 @@ export function parseCsProject(paths: string[], root?: string): Model {
   for (const [name, info] of rawFuncs) {
     const fid = `${info.rel}::${name}`;
     funcsByName.set(name, fid);
+    const fpath = containerPath(info.meta, info.rel);
     const func: Func = makeFunc({
       id: fid,
       name,
@@ -236,7 +239,8 @@ export function parseCsProject(paths: string[], root?: string): Model {
       tooltip: info.meta.get("tooltip") ?? "",
       asset: info.meta.get("asset") ?? "",
       external: info.meta.get("external") === "true",
-      group: stem(info.rel),
+      group: topGroup(fpath),
+      path: fpath,
     });
     model.addFunc(func);
 

@@ -6,7 +6,12 @@
  * 刻意不把它们写进 L1 金标准。
  */
 
-export type Direction = "in" | "out" | "inout";
+/**
+ * 信号方向。空串是合法值：注解里没写 `dir`（或写成 `dir=""`）时就是它 ——
+ * 信号照样成立，只是没有方向。别把空串当"非法"而把整个信号丢掉。
+ */
+export type Direction = "in" | "out" | "inout" | "";
+
 
 export interface Signal {
   id: string;
@@ -20,6 +25,12 @@ export interface Signal {
   note: string;
   external: boolean;
   group: string;
+  /**
+   * 容器层级，`adc/采样前端` 这样的斜杠路径。空串表示「没标」，解析器会把它归一化成
+   * 模块名（`adc.h` -> `adc`），所以下游拿到的 path 永远非空。
+   * `group` 恒等于 path 的第一段，是给「只关心顶层容器」的旧代码用的。
+   */
+  path: string;
   x: number;
   y: number;
   w: number;
@@ -45,6 +56,7 @@ export interface Func {
   asset: string;
   external: boolean;
   group: string;
+  path: string;
   reads: string[];
   writes: string[];
   calls: string[];
@@ -86,6 +98,7 @@ export function makeSignal(init: Partial<Signal> & Pick<Signal, "id" | "name" | 
     note: "",
     external: false,
     group: "",
+    path: "",
     x: 0,
     y: 0,
     w: SIGNAL_W,
@@ -106,6 +119,7 @@ export function makeFunc(init: Partial<Func> & Pick<Func, "id" | "name">): Func 
     asset: "",
     external: false,
     group: "",
+    path: "",
     reads: [],
     writes: [],
     calls: [],

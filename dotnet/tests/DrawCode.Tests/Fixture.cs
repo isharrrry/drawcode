@@ -40,4 +40,14 @@ internal static class Fixture
     }
 
     public static string Read(string path) => Text.ReadSource(path);
+
+    /// <summary>把一个临时源码文件写进 scratch 目录并解析它。</summary>
+    public static Model FromSource(string fileName, string source)
+    {
+        var dir = Path.Combine(ScratchRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, fileName);
+        File.WriteAllText(path, source);
+        return ParseDispatch.ParseAny([path], dir);
+    }
 }

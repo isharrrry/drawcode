@@ -23,10 +23,24 @@ from .cparse import FUNC_RE, KV_RE, SIGNAL_RE
 CTYPE_RE = re.compile(r"^(?P<base>.+?)(?P<arr>\[[^\]]*\])?$")
 NAME_RE = re.compile(r"^([A-Za-z_]\w*)")
 
+# 认不出类型时落的占位类型，以及提醒用户去改的那行注释。
+PLACEHOLDER_CTYPE = "int"
+PLACEHOLDER_TODO = "/* drawcode: 未能从图里认出类型，暂用 %s —— 请改成实际类型 */"
+
 
 def split_ctype(ctype):
-    """把 `float[32]` 拆成 (`float`, `[32]`)；无数组则 arr 为空串。"""
-    m = CTYPE_RE.match(ctype.strip())
+    """把 `float[32]` 拆成 (`float`, `[32]`)；无数组则 arr 为空串。
+
+    类型可以为空——用户在 draw.io 里新加的节点只有个名字，adopt.py 明确选择
+    「解析不出就留空并报告」而不是替它编一个类型。所以这里必须容忍空串，
+    早先直接 match 会在 `ctype=""` 时抛 AttributeError，把整个 sync 打断。
+    """
+    text = (ctype or "").strip()
+    if not text:
+        return "", ""
+    m = CTYPE_RE.match(text)
+    if not m:
+        return text, ""
     return m.group("base").strip(), (m.group("arr") or "")
 
 
@@ -59,11 +73,27 @@ def render_annotation(sig):
 
 
 def render_signal(sig):
-    """渲染「注解行 + 声明行」。无注解时只输出声明行（不留空注释）。"""
+    """渲染「注解行 + 声明行」。无注解时只输出声明行（不留空注释）。
+
+    类型可能为空（元素是从图里接回来的，label 只写了名字）。这时**必须**落一个
+    真实类型名，不能只写标识符本身：
+
+      1. 文件作用域的 `g_unknown;` 不是声明，不是合法 C；
+      2. 解析器要求 `<type> <name>;`，只写名字就读不回来 —— 下一次 sync 会把
+         它当成「图里新加的元素」再追加一遍，于是 sync 不幂等。
+
+    TODO 放在**单独一行**（不是行尾），否则 SIGNAL_RE 的 ``;$`` 就匹配不上。
+    """
     base, arr = split_ctype(sig.ctype)
-    line = "%s %s%s;" % (base, sig.name, arr)
+    untyped = not base
+    if untyped:
+        base = PLACEHOLDER_CTYPE
+    line = ("%s %s%s" % (base, sig.name, arr)).strip() + ";"
     ann = render_annotation(sig)
-    return ann + "\n" + line if ann else line
+    out = ann + "\n" + line if ann else line
+    if untyped:
+        out = (PLACEHOLDER_TODO % base) + "\n" + out
+    return out
 
 
 def render_func_kv(func):
@@ -114,6 +144,22 @@ def _merge_annotation(orig_line, kv_new):
     return "/// @drawcode " + _kv_text(out)
 
 
+def render_func_skeleton(f):
+    """为一个只有图形、没有源码的函数生成「签名 + 空实现」。
+
+    带空实现是刻意的：只给声明的话 C 侧能编译、链接时才报未定义符号，
+    错误暴露得太晚；空实现让产物立刻可编译，缺口以注释形式留在原地。
+    """
+    ret = f.ret or "void"
+    if f.params:
+        params = ", ".join(
+            ("%s %s" % (p.ctype, p.name)) if p.ctype else p.name for p in f.params
+        )
+    else:
+        params = "void"
+    return "%s %s(%s)\n{\n    /* TODO: drawcode 从图里新建，尚未实现 */\n}" % (ret, f.name, params)
+
+
 def _func_block(func, dev, orig):
     """渲染一个函数的声明层：@drawcode 行、@device 行，然后是原有的非注解行。
 
@@ -160,6 +206,27 @@ def sync_functions(path, model, rel):
         rendered = _func_block(f, model.devices.get(f.id), block)
         if block != rendered:
             new_lines[start:end] = rendered
+
+    # 图里有、源码里还没有的函数 —— 这正是「用户在 draw.io 里新加了一个函数节点」
+    # 的情形（见 adopt.py）。追加到文件末尾，并带上空实现骨架，使产物仍能编译过：
+    # 只给声明的话，C 侧能编译但链接会报未定义符号。
+    known = {name for _, _, name in spans}
+    missing = [f for n, f in funcs.items() if n not in known]
+    if missing:
+        add = []
+        for f in sorted(missing, key=lambda f: f.name):
+            kv = render_func_kv(f)
+            if kv:
+                add.append("/// @drawcode " + _kv_text(kv))
+            dev_kv = render_device_kv(model.devices.get(f.id))
+            if dev_kv:
+                add.append("/// @device " + " ".join('%s="%s"' % p for p in dev_kv))
+            add.append(render_func_skeleton(f))
+            add.append("")
+        while new_lines and not new_lines[-1].strip():
+            new_lines.pop()
+        new_lines.append("")
+        new_lines.extend(add)
 
     if new_lines == lines:
         return False

@@ -347,27 +347,30 @@ def _dir_rank(e):
     return 1
 
 
+def _all_members(nodes, path):
+    """一个容器及其所有子孙的成员，展开成一维列表。"""
+    out = list(nodes[path]["members"])
+    for child in nodes[path]["children"]:
+        out.extend(_all_members(nodes, child))
+    return out
+
+
 def _assign_default_positions(model):
-    """给没坐标的实体排初始位；容器之间做水平避让，保证不互相压住。
+    """给没坐标的实体排初始位；顶层容器之间做水平避让，保证不互相压住。
 
     ``if e.x == 0 and e.y == 0`` 是「这个节点还没有坐标」的约定——所以原点处的节点
     会被当成未定位并重新排布。带着人工坐标（``@drawcode xy="…"``）的节点不受影响。
+
+    容器层级来自 ``path``：没有斜杠的源码每棵树只有一层，此时结果与老版本完全一致。
     """
-    groups = {}
-    for kind, e in _entities(model):
-        groups.setdefault(e.group or "misc", []).append(e)
+    nodes = _container_tree(model)
+    tops = sorted(p for p in nodes if "/" not in p)
 
     right_edge = None
-    for gname in sorted(groups):
-        # 组名排序 + 组内 (方向权, id) 排序：全程确定性，保证同输入同输出
-        members = sorted(groups[gname], key=lambda e: (_dir_rank(e), e.id))
-        y = PAD + HEADER + PAD
-        for e in members:
-            if e.x == 0 and e.y == 0:
-                e.x, e.y = PAD, y
-            y += e.h + GAP_Y
-
-        # 若这一组比已排好的往左，就整组右移，避免两个容器水平重叠
+    for gname in tops:
+        _layout_tree(nodes, gname, PAD, PAD + HEADER + PAD)
+        members = _all_members(nodes, gname)
+        # 若这一棵树比已排好的往左，就整棵右移，避免两个顶层容器水平重叠
         box = _container_box(members)
         if right_edge is not None and box[0] < right_edge:
             dx = right_edge - box[0]
@@ -379,6 +382,9 @@ def _assign_default_positions(model):
 
 def _container_box(members):
     """容器的包围盒。节点尺寸已经含了尖角，不需要再为方向记号留余量。"""
+    if not members:
+        # 中间容器（`a/b/c` 里的 `b`）只有子容器、没有直属成员，会走到这里。
+        return 0.0, 0.0, 0.0, 0.0
     xs = [e.x for e in members]
     ys = [e.y for e in members]
     x2 = [e.x + e.w for e in members]
@@ -387,6 +393,98 @@ def _container_box(members):
     ow = max(x2) - min(xs) + 2 * PAD
     oh = max(y2) - min(ys) + 2 * PAD + HEADER
     return ox, oy, ow, oh
+
+
+def _entity_path(e):
+    """实体的容器路径。
+
+    `path` 是完整层级（`adc/采样`），`group` 是它的第一段。老实体只填了 group，
+    所以这里退回 group；两者都空才落到 `misc`。解析器保证 path 非空，
+    这个兜底是给手工构造的 model 用的。
+    """
+    return getattr(e, "path", "") or e.group or "misc"
+
+
+def _container_tree(model):
+    """从所有实体的 path 推出容器树。
+
+    返回 ``{path: {"members": [...], "children": [child_path, ...]}}``。
+    中间层级即使没有直属成员也会被建出来 —— ``path="adc/采样"`` 里那个 `adc`
+    必须存在，否则子容器会没有父框可挂。
+    """
+    nodes = {}
+    for _, e in _entities(model):
+        parts = _entity_path(e).split("/")
+        for i in range(len(parts)):
+            nodes.setdefault("/".join(parts[: i + 1]), {"members": [], "children": []})
+        nodes["/".join(parts)]["members"].append(e)
+    for p in list(nodes):
+        if "/" in p:
+            parent = p.rsplit("/", 1)[0]
+            if p not in nodes[parent]["children"]:
+                nodes[parent]["children"].append(p)
+    return nodes
+
+
+def _stack(members, x_left, y_top):
+    """把一组实体在给定左上角垂直堆叠，返回它们的包围盒。"""
+    y = y_top
+    for e in members:
+        if e.x == 0 and e.y == 0:
+            e.x, e.y = x_left, y
+        y += e.h + GAP_Y
+    return _container_box(members)
+
+
+def _subtree_members(nodes, path):
+    """一个容器子树里的全部实体（含各级子容器的）。"""
+    out = list(nodes[path]["members"])
+    for child in nodes[path]["children"]:
+        out.extend(_subtree_members(nodes, child))
+    return out
+
+
+def _layout_tree(nodes, path, x_left, y_top):
+    """递归排布一个容器：子容器各成一块，直属成员另成一块，横向依次摆开。
+
+    单层容器（没有子容器）时，这就退化成「成员垂直堆叠」——与老行为完全一致，
+    所以没有任何 ``path=`` 的源码产物逐字节不变。
+    """
+    node = nodes[path]
+    own = sorted(node["members"], key=lambda e: (_dir_rank(e), e.id))
+
+    # 块宽必须按**整棵子树**算。中间容器（`a/b/c` 里的 `b`）自己没有直属成员，
+    # 若只看它的 members，宽度是 0 → 游标不前进 → 几棵子树叠在一起。
+    blocks = []
+    for child in sorted(node["children"]):
+        _layout_tree(nodes, child, 0.0, 0.0)
+        members = _subtree_members(nodes, child)
+        if members:
+            blocks.append(members)
+    if own:
+        blocks.append(own)
+
+    if not blocks:
+        return None
+
+    # 游标走的是**块左边界**（和 _container_box 同一基准），不是成员坐标 ——
+    # 早先把成员坐标 x_left 和包围盒左边界 box[0] 拿来比较，两者差一个 PAD，
+    # 于是永远判定"需要平移"，把整块又推了 30。
+    cursor = x_left
+    for members in blocks:
+        if members is own:
+            _stack(members, cursor, y_top)
+        else:
+            # 子容器已经在局部坐标系里排好了，整体平移到游标即可 ——
+            # 它的子容器也在这份 members 里，所以会跟着一起走。
+            box = _container_box(members)
+            dx = cursor - box[0]
+            for e in members:
+                e.x += dx
+        box = _container_box(members)
+        cursor = box[0] + box[2] + 2 * PAD + PAD
+
+    return _container_box([e for members in blocks for e in members])
 
 
 def _node_label(kind, e):
@@ -406,34 +504,51 @@ def to_drawio(model):
     """
     _assign_default_positions(model)
 
-    groups = {}
-    for kind, e in _entities(model):
-        groups.setdefault(e.group or "misc", []).append(e)
+    nodes = _container_tree(model)
+    paths = sorted(nodes)
 
-    # 容器 id 与原点：节点坐标在 XML 里是**相对父容器**的，所以处处要减去 origin
-    gid = {g: "grp%d" % (i + 1) for i, g in enumerate(sorted(groups))}
-    origin = {}
-    boxes = {}
-    for g in sorted(groups):
-        boxes[g] = _container_box(groups[g])
-        origin[g] = boxes[g][:2]
+    # 容器 id 与原点：节点坐标在 XML 里是**相对父容器**的，所以处处要减去父的原点。
+    # 顶层容器没有父，原点就是根 (0,0) —— 单层源码因此与老版本逐位相同。
+    gid = {p: "grp%d" % (i + 1) for i, p in enumerate(paths)}
+    boxes = {p: _container_box(_all_members(nodes, p)) for p in paths}
+
+    def _parent_path(p):
+        return p.rsplit("/", 1)[0] if "/" in p else None
+
+    def _origin_of(p):
+        """容器自己的原点 —— 它的几何是相对**父容器**写的。"""
+        pp = _parent_path(p)
+        return boxes[pp][:2] if pp else (0.0, 0.0)
 
     cell_id = {}
     for i, (kind, e) in enumerate(sorted(_entities(model), key=lambda t: t[1].id)):
         cell_id[e.id] = "n%d" % (i + 1)
 
     out = []
-    for g in sorted(groups):
-        ox, oy, ow, oh = boxes[g]
+    for p in paths:
+        ox, oy, ow, oh = boxes[p]
+        pox, poy = _origin_of(p)
+        pp = _parent_path(p)
         out.append(
-            '        <mxCell id="%s" value="%s" style="%s" vertex="1" parent="1">\n'
+            '        <mxCell id="%s" value="%s" style="%s" vertex="1" parent="%s">\n'
             '          <mxGeometry x="%s" y="%s" width="%s" height="%s" as="geometry" />\n'
             "        </mxCell>\n"
-            % (gid[g], escape(g), CONT_STYLE, _num(ox), _num(oy), _num(ow), _num(oh))
+            % (
+                gid[p],
+                escape(p.rsplit("/", 1)[-1]),
+                CONT_STYLE,
+                gid[pp] if pp else "1",
+                _num(ox - pox),
+                _num(oy - poy),
+                _num(ow),
+                _num(oh),
+            )
         )
 
     for kind, e in sorted(_entities(model), key=lambda t: t[1].id):
-        ox, oy = origin[e.group or "misc"]
+        epath = _entity_path(e)
+        # 节点相对**自己的容器**，不是父容器 —— 这和容器的相对基准不同，别合并
+        ox, oy = boxes[epath][:2]
         style = (
             SIGNAL_DIR_STYLE.get(getattr(e, "dir", ""), SIGNAL_STYLE)
             if kind == "signal"
@@ -458,7 +573,7 @@ def to_drawio(model):
             % (
                 _attrs(pairs),
                 style,
-                gid[e.group or "misc"],
+                gid[epath],
                 _num(e.x - ox),
                 _num(e.y - oy),
                 _num(e.w),
@@ -467,17 +582,17 @@ def to_drawio(model):
         )
 
     for i, e in enumerate(sorted(model.edges, key=_edge_key)):
-        src_group = model.signals[e.src].group if e.src in model.signals else model.funcs[e.src].group
-        dst_group = model.signals[e.dst].group if e.dst in model.signals else model.funcs[e.dst].group
+        src_path = _entity_path(model.signals[e.src] if e.src in model.signals else model.funcs[e.src])
+        dst_path = _entity_path(model.signals[e.dst] if e.dst in model.signals else model.funcs[e.dst])
         # 同容器内的边挂在该容器下（坐标相对容器），跨容器的边挂在根下（坐标绝对）
-        parent = gid[src_group] if src_group == dst_group else "1"
-        ox, oy = origin.get(src_group, (0, 0)) if parent != "1" else (0, 0)
+        parent = gid[src_path] if src_path == dst_path else "1"
+        ox, oy = boxes[src_path][:2] if parent != "1" else (0, 0)
         style = EDGE_STYLE
         waypoints = list(e.waypoints)
         if not waypoints:
             # 没有人工拐点才自动路由。人工拖过的边保持原样，不覆盖用户的选择。
             avoid = [(o.x, o.y, o.w, o.h) for _, o in _entities(model)]
-            gap = _cross_gap(boxes[src_group], boxes[dst_group]) if parent == "1" else None
+            gap = _cross_gap(boxes[src_path], boxes[dst_path]) if parent == "1" else None
             anchors, waypoints = _route_edge(model, e, avoid, gap)
             if anchors is not None:
                 # 锚点写进 style，draw.io 才会把线精确地贴在指定边的指定位置上
@@ -629,7 +744,7 @@ def _origin(cells, cid):
     return x, y
 
 
-def read_layout(xml):
+def read_layout(xml, include_foreign=False):
     """读出人工排版：节点坐标、节点属性（attrs）、边的拐点。
 
     **只认带 symbolId 的元素**，所以：
@@ -638,6 +753,14 @@ def read_layout(xml):
         这是**正确的**：那种图没有 drawcode 的节点身份，本来就无法当作排版来源。
         调用方（CLI）会因此报错而不是静默继续，见 cli.py 的 --layout-from 守卫。
       * 容器等裸 mxCell —— 天然被忽略，不会污染 IR。
+
+    ``include_foreign=True`` 时另外返回两项，供 ``adopt`` 把「用户在 draw.io 里
+    新加的元素」接回 IR：
+
+      ``containers`` —— 容器 cell id -> 容器名（= group 名 = 文件），用来判断
+      新元素该落进哪个源文件；
+      ``foreign``    —— 图里可见、但没有 drawcode 身份的顶点。默认不返回，
+      因为绝大多数调用方（尤其 --layout-from）只关心既有节点。
     """
     cells = _load_cells(xml)
     nodes, edges, attrs = {}, {}, {}
@@ -677,7 +800,59 @@ def read_layout(xml):
                 for p in arr.findall("mxPoint"):
                     pts.append((float(p.get("x") or 0) + ox, float(p.get("y") or 0) + oy))
         edges["%s->%s:%s" % (src, dst, info["rw"] or "read")] = pts
-    return {"nodes": nodes, "edges": edges, "attrs": attrs}
+    result = {"nodes": nodes, "edges": edges, "attrs": attrs}
+    if include_foreign:
+        containers = _containers(xml)
+        result["containers"] = containers
+        result["foreign"] = _foreign_cells(cells, containers)
+    return result
+
+
+def _containers(xml):
+    """容器 cell id -> 容器名。容器名就是 group 名，也是它对应的源文件名（不含扩展名）。"""
+    root = _unpack(xml)
+    out = {}
+    for el in root.iter("mxCell"):
+        if el.get("vertex") == "1" and "swimlane" in (el.get("style") or ""):
+            out[el.get("id")] = (el.get("value") or "").strip()
+    return out
+
+
+def _foreign_cells(cells, containers):
+    """图里「能看见、但不是 drawcode 节点」的顶点。
+
+    用户手工加元素有两种常见做法，两种都会落到这里：
+
+      * 直接拖一个形状出来 —— 裸 mxCell，没有 symbolId；
+      * 复制一个已有节点 —— 副本带着**同一个 symbolId**，于是被 _load_cells
+        折叠到原节点上，表现为「图里多了一个但读回来没多」。
+
+    这里按 cell id 收集，所以上面第二种情况仍然能被发现：副本的 cell id 是新的。
+    """
+    out = []
+    for cid, info in cells.items():
+        if info["edge"] or info["symbolId"]:
+            continue
+        if cid in containers:
+            continue  # 容器本身就是 swimlane，不是用户新加的元素
+        geom = info["cell"].find("mxGeometry")
+        if geom is None:
+            continue
+        el = info["el"]
+        out.append(
+            {
+                "cell_id": cid,
+                "label": (el.get("label") or el.get("value") or "").strip(),
+                "style": info["cell"].get("style") or "",
+                "parent": info["parent"],
+                "container": containers.get(info["parent"], ""),
+                "x": float(geom.get("x") or 0),
+                "y": float(geom.get("y") or 0),
+                "w": float(geom.get("width") or 0),
+                "h": float(geom.get("height") or 0),
+            }
+        )
+    return out
 
 
 def apply_layout(model, layout):

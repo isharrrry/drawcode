@@ -80,6 +80,26 @@ internal static partial class CParse
     /// <summary>去掉目录与扩展名的文件名；容器的默认名字。</summary>
     internal static string Stem(string rel) => Path.GetFileNameWithoutExtension(rel);
 
+    /// <summary>
+    /// 容器的斜杠路径，例如 <c>adc/采样前端</c>。
+    ///
+    /// 标了 <c>path="adc/采样前端"</c> 就用它；没标则退回模块名（<c>adc.h</c> -&gt; <c>adc</c>）。
+    /// 这样旧源码一个字不改也照常工作，而且下游拿到的 path <b>永远非空</b> ——
+    /// 「没标」和「标成空」是同一种情况，不需要在别处再判一次。
+    /// </summary>
+    internal static string ContainerPath(Dictionary<string, string> meta, string rel)
+    {
+        var raw = meta.TryGetValue("path", out var v) ? v.Trim() : "";
+        return raw.Trim('/') is { Length: > 0 } trimmed ? trimmed : Stem(rel);
+    }
+
+    /// <summary>path 的第一段，即最外层容器名。</summary>
+    internal static string TopGroup(string path)
+    {
+        var i = path.IndexOf('/');
+        return i < 0 ? path : path[..i];
+    }
+
     /// <summary>从声明上方的注解块里收集键值对（带引号与裸值都要认）。</summary>
     internal static (Dictionary<string, string> Meta, Dictionary<string, string> Device) ReadAnnotations(IReadOnlyList<string> buf)
     {
@@ -363,6 +383,7 @@ internal static partial class CParse
 
         foreach (var (rel, lineno, direction, ctype, name, meta) in rawSignals)
         {
+            var cpath = ContainerPath(meta, rel);
             model.AddSignal(new Signal
             {
                 Id = rel + "::" + name,
@@ -375,7 +396,8 @@ internal static partial class CParse
                 Alias = meta.GetValueOrDefault("alias", ""),
                 Note = meta.GetValueOrDefault("note", ""),
                 External = meta.GetValueOrDefault("external", "") == "true",
-                Group = Stem(rel),
+                Group = TopGroup(cpath),
+                Path = cpath,
             });
         }
 
@@ -391,6 +413,7 @@ internal static partial class CParse
             var fid = info.Rel + "::" + name;
             funcsByName[name] = fid;
             var meta = info.Meta;
+            var fpath = ContainerPath(meta, info.Rel);
             model.AddFunc(new Func
             {
                 Id = fid,
@@ -404,7 +427,8 @@ internal static partial class CParse
                 Tooltip = meta.GetValueOrDefault("tooltip", ""),
                 Asset = meta.GetValueOrDefault("asset", ""),
                 External = meta.GetValueOrDefault("external", "") == "true",
-                Group = Stem(info.Rel),
+                Group = TopGroup(fpath),
+                Path = fpath,
             });
 
             var xy = meta.GetValueOrDefault("xy");

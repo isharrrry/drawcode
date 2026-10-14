@@ -15,6 +15,14 @@ internal interface INode
 {
     string Id { get; }
     string Group { get; set; }
+
+    /// <summary>
+    /// 容器层级，<c>adc/采样前端</c> 这样的斜杠路径。空串表示「没标」，解析器会把它归一化成
+    /// 模块名（<c>adc.h</c> -&gt; <c>adc</c>），所以下游拿到的 path 永远非空。
+    /// <c>Group</c> 恒等于 path 的第一段，是给「只关心顶层容器」的旧代码用的。
+    /// </summary>
+    string Path { get; set; }
+
     double X { get; set; }
     double Y { get; set; }
     double W { get; set; }
@@ -36,6 +44,7 @@ public sealed class Signal : INode
     public string Note { get; set; } = "";
     public bool External { get; set; }
     public string Group { get; set; } = "";
+    public string Path { get; set; } = "";
     public double X { get; set; }
     public double Y { get; set; }
     public double W { get; set; } = 160;
@@ -65,6 +74,7 @@ public sealed class Func : INode
     public string Asset { get; set; } = "";
     public bool External { get; set; }
     public string Group { get; set; } = "";
+    public string Path { get; set; } = "";
     public List<string> Reads { get; set; } = [];
     public List<string> Writes { get; set; } = [];
     public List<string> Calls { get; set; } = [];

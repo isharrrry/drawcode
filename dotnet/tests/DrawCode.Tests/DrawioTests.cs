@@ -136,6 +136,8 @@ public class DrawioEmitTests
     public void ContainerTitlesAreHtmlEscaped()
     {
         var model = Fixture.SmallC();
+        // 容器标题取 path 的最后一段（Group 是它的第一段），两个都要设
+        model.Signals["adc.h::g_raw"].Path = "a<b&c";
         model.Signals["adc.h::g_raw"].Group = "a<b&c";
         var xml = Drawio.ToDrawio(model);
         Assert.Contains("value=\"a&lt;b&amp;c\"", xml);

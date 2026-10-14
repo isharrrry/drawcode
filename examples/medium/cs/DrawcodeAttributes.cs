@@ -51,6 +51,13 @@ public sealed class DrawcodeAttribute : Attribute
 
     /// <summary>Image path recorded on the node. The path is recorded, never resolved.</summary>
     public string? Asset { get; set; }
+
+    /// <summary>
+    /// Container hierarchy, e.g. <c>"adc/采样前端"</c>. Slash-separated; each segment becomes a
+    /// nested box and the last one is the node's own box title. Omit it and the container falls
+    /// back to the module name (<c>Adc.cs</c> -&gt; <c>Adc</c>), so existing sources need no change.
+    /// </summary>
+    public string? Path { get; set; }
 }
 
 /// <summary>Marks the accessor of an external device, e.g. <c>AdcRead()</c>.</summary>

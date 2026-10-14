@@ -25,7 +25,7 @@ attribute 的类型定义见 ``examples/*/cs/DrawcodeAttributes.cs``（解析器
 import os
 import re
 
-from .cparse import _def_use, _parse_params, _rel, _stem
+from .cparse import _container_path, _def_use, _parse_params, _rel, _stem, _top_group
 from .model import Device, Func, Model, Signal
 
 # Direction values come from the `Direction` enum that ships with the toolchain
@@ -165,6 +165,7 @@ def parse_cs_project(paths, root=None):
                 }
 
     for rel, lineno, direction, ctype, name, meta in raw_signals:
+        cpath = _container_path(meta, rel)
         model.add_signal(
             Signal(
                 id="%s::%s" % (rel, name),
@@ -177,7 +178,8 @@ def parse_cs_project(paths, root=None):
                 alias=meta.get("alias", ""),
                 note=meta.get("note", ""),
                 external=meta.get("external", "") == "true",
-                group=_stem(rel),
+                group=_top_group(cpath),
+                path=cpath,
             )
         )
 
@@ -187,6 +189,7 @@ def parse_cs_project(paths, root=None):
         fid = "%s::%s" % (info["rel"], name)
         funcs_by_name[name] = fid
         meta = info["meta"]
+        fpath = _container_path(meta, info["rel"])
         model.add_func(
             Func(
                 id=fid,
@@ -200,7 +203,8 @@ def parse_cs_project(paths, root=None):
                 tooltip=meta.get("tooltip", ""),
                 asset=meta.get("asset", ""),
                 external=meta.get("external", "") == "true",
-                group=_stem(info["rel"]),
+                group=_top_group(fpath),
+                path=fpath,
             )
         )
         # 注意这里只读 dev 的 size（器件封装），不读 meta 的 size（节点几何）——

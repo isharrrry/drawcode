@@ -264,9 +264,12 @@ class TestHandDrawnDiagram(unittest.TestCase):
 
         from drawcode import cli
 
+        # one module only: a multi-module build refuses --out outright, and that
+        # refusal would mask the --layout-from guard this test is about
+        files = [os.path.join(EX, f) for f in ("adc.h", "adc.c")]
         out = os.path.join(tempfile.mkdtemp(), "o.drawio")
         with self.assertRaises(SystemExit) as caught:
-            cli.main(["build"] + FILES + ["--out", out, "--layout-from", HAND_DRAWN])
+            cli.main(["build"] + files + ["--out", out, "--layout-from", HAND_DRAWN])
         self.assertIn("no drawcode nodes", str(caught.exception))
         self.assertFalse(os.path.exists(out))
 
@@ -275,9 +278,10 @@ class TestHandDrawnDiagram(unittest.TestCase):
 
         from drawcode import cli
 
+        files = [os.path.join(EX, f) for f in ("adc.h", "adc.c")]
         out = os.path.join(tempfile.mkdtemp(), "o.drawio")
         with self.assertRaises(SystemExit) as caught:
-            cli.main(["build"] + FILES + ["--out", out, "--layout-from", os.path.join(out, "nope.drawio")])
+            cli.main(["build"] + files + ["--out", out, "--layout-from", os.path.join(out, "nope.drawio")])
         self.assertIn("no such file", str(caught.exception))
 
 

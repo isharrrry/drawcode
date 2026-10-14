@@ -102,7 +102,22 @@ internal static class Svg
         Drawio.AssignDefaultPositions(model);
         var ents = Drawio.Entities(model).Select(t => t.Node).ToList();
 
-        var groups = Drawio.GroupEntities(model);
+        // 预览图只画**顶层**容器，与 Python `svg.py` / TypeScript `svg.ts` 一致：
+        // 它们也是按 Group（path 的第一段）分组的。嵌套层级只在 .drawio 里体现，
+        // 改这里会让三语言的 SVG 分叉。
+        var groups = new Dictionary<string, List<INode>>(StringComparer.Ordinal);
+        foreach (var (_, e) in Drawio.Entities(model))
+        {
+            var key = e.Group.Length > 0 ? e.Group : "misc";
+            if (!groups.TryGetValue(key, out var list))
+            {
+                list = [];
+                groups[key] = list;
+            }
+
+            list.Add(e);
+        }
+
         var boxes = groups.ToDictionary(g => g.Key, g => Drawio.ContainerBox(g.Value), StringComparer.Ordinal);
 
         var xs = ents.Select(e => e.X).Concat(boxes.Values.Select(b => b.X)).ToList();

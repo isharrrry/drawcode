@@ -19,7 +19,7 @@
  */
 
 import { abspath, countOccurrences, dirname, readTextFile, relPath, splitlines, stem } from "./fsutil.ts";
-import type { Func, Param } from "./model.ts";
+import type { Direction, Func, Param } from "./model.ts";
 import { Model, makeDevice, makeFunc, makeSignal } from "./model.ts";
 import { compareCodePoints } from "./order.ts";
 import { findAll, findAll1, findAllGroups, matchAt, sub } from "./regex.ts";
@@ -69,6 +69,23 @@ export function splitSignals(text: string): [string, string] {
   const m = matchAt(SPLIT_SIGNAL_RE, trimmed);
   if (m === null) return [trimmed, ""];
   return [m[1] as string, m[2] ?? ""];
+}
+
+/**
+ * 容器的斜杠路径，例如 `adc/采样前端`。
+ *
+ * 标了 `path="adc/采样前端"` 就用它；没标则退回模块名（`adc.h` -> `adc`）。
+ * 这样旧源码一个字不改也照常工作，而且下游拿到的 path **永远非空** ——
+ * 「没标」和「标成空」是同一种情况，不需要在别处再判一次。
+ */
+export function containerPath(meta: Map<string, string>, rel: string): string {
+  const raw = (meta.get("path") ?? "").trim();
+  return raw.replace(/^\/+|\/+$/g, "") || stem(rel);
+}
+
+/** path 的第一段，即最外层容器名。*/
+export function topGroup(path: string): string {
+  return path.split("/")[0] as string;
 }
 
 /** 擦除块注释与行注释（对等 Python 侧带 re.S 的 `/*...*/` 替换，再做 `//...` 替换）。*/
@@ -261,7 +278,7 @@ export function parseProject(paths: string[], root?: string): Model {
   interface RawSignal {
     rel: string;
     line: number;
-    dir: "in" | "out" | "inout";
+    dir: Direction;
     ctype: string;
     name: string;
     meta: Map<string, string>;
@@ -288,21 +305,23 @@ export function parseProject(paths: string[], root?: string): Model {
       const [meta, dev] = readAnnotations(buf);
       buf = [];
 
+      // 判据是「有注解」，对等 Python 的 `if ms and meta`：
+      //   * 没有注解的声明不进 IR —— 否则函数体里的 `int i;` 会被当成顶层信号；
+      //   * `dir` 可以缺省、也可以为空，那种情况下信号照样成立，只是没有方向。
+      // 早先这里写成 `dirKey !== undefined`，把「有没有注解」和「有没有 dir」混成了
+      // 同一件事：`/// @drawcode path="p"` 没有 dir，整条声明就消失了。现在两者分开。
       const dirKey = meta.get("dir");
-      const ms = dirKey !== undefined ? matchAt(SIGNAL_RE, s) : null;
+      const ms = meta.size > 0 ? matchAt(SIGNAL_RE, s) : null;
       if (ms !== null) {
-        const dir = DIR_BY_KEY[dirKey as string];
-        if (dir !== undefined) {
-          rawSignals.push({
-            rel,
-            line: lineno,
-            dir,
-            ctype: (ms.groups?.ctype as string).trim() + (ms.groups?.arr ?? ""),
-            name: ms.groups?.name as string,
-            meta,
-          });
-          continue;
-        }
+        rawSignals.push({
+          rel,
+          line: lineno,
+          dir: (dirKey !== undefined ? DIR_BY_KEY[dirKey] : undefined) ?? "",
+          ctype: (ms.groups?.ctype as string).trim() + (ms.groups?.arr ?? ""),
+          name: ms.groups?.name as string,
+          meta,
+        });
+        continue;
       }
 
       const mf = matchAt(FUNC_RE, s);
@@ -331,6 +350,7 @@ export function parseProject(paths: string[], root?: string): Model {
   }
 
   for (const rs of rawSignals) {
+    const cpath = containerPath(rs.meta, rs.rel);
     model.addSignal(
       makeSignal({
         id: `${rs.rel}::${rs.name}`,
@@ -343,7 +363,8 @@ export function parseProject(paths: string[], root?: string): Model {
         alias: rs.meta.get("alias") ?? "",
         note: rs.meta.get("note") ?? "",
         external: rs.meta.get("external") === "true",
-        group: stem(rs.rel),
+        group: topGroup(cpath),
+        path: cpath,
       }),
     );
   }
@@ -356,6 +377,7 @@ export function parseProject(paths: string[], root?: string): Model {
     const fid = `${info.rel}::${name}`;
     funcsByName.set(name, fid);
     const meta = info.meta ?? new Map<string, string>();
+    const fpath = containerPath(meta, info.rel as string);
     const func: Func = makeFunc({
       id: fid,
       name,
@@ -368,7 +390,8 @@ export function parseProject(paths: string[], root?: string): Model {
       tooltip: meta.get("tooltip") ?? "",
       asset: meta.get("asset") ?? "",
       external: meta.get("external") === "true",
-      group: stem(info.rel as string),
+      group: topGroup(fpath),
+      path: fpath,
     });
     model.addFunc(func);
 
