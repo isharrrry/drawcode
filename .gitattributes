@@ -1,0 +1,12 @@
+# Byte-for-byte output is this project's core guarantee, so line endings must not
+# drift between checkouts. Force LF everywhere; Windows users still get LF files.
+* text=auto eol=lf
+
+# Binary assets: never touch
+*.png binary
+*.ico binary
+*.jpg binary
+
+# Golden files are compared by SHA256; they must survive a fresh clone unchanged.
+tests/golden/** -text
+typescript/test/fixtures/** -text
