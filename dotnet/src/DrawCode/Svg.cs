@@ -13,6 +13,7 @@
  */
 
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DrawCode;
 
@@ -74,7 +75,84 @@ internal static class Svg
         return [(f.Alias.Length > 0 ? f.Alias : f.Name) + "()", f.Ret + " " + f.Name + "()"];
     }
 
-    private static List<(double X, double Y)> EdgePoints(Model model, Edge e)
+    private static readonly Regex BrRe = new(@"<br\s*/?>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex StrokeRe = new(@"strokeColor=(#[0-9a-fA-F]{3,8})", RegexOptions.Compiled);
+
+    /// <summary>文字块按 <c>&lt;br&gt;</c> 断行 —— 与 .drawio 侧 html=1 的换行语义是同一件事。</summary>
+    private static List<string> CalloutLines(Callout c) => [.. BrRe.Split(c.Text)];
+
+    /// <summary>
+    /// 画一个文字块。band 铺在容器之上、节点之下；box/text 画在节点之后压在上面。
+    /// 先后次序由调用点决定，这里只负责画 —— 与 <see cref="Drawio.ToDrawio"/> 的
+    /// EmitCallouts 对齐。
+    /// </summary>
+    private static string CalloutSvg(Callout c)
+    {
+        var size = c.FontSize > 0 ? c.FontSize : Drawio.CalloutFont.GetValueOrDefault(c.Shape, 12);
+        var sb = new StringBuilder();
+        if (c.Shape != "text")
+        {
+            var dash = c.Shape == "band" ? " stroke-dasharray=\"6 4\"" : "";
+            sb.Append("<rect x=\"").Append(Text.Num(c.X)).Append("\" y=\"").Append(Text.Num(c.Y))
+              .Append("\" width=\"").Append(Text.Num(c.W)).Append("\" height=\"").Append(Text.Num(c.H))
+              .Append("\" rx=\"4\" fill=\"").Append(Drawio.CalloutFill.GetValueOrDefault(c.Shape, "none"))
+              .Append("\" stroke=\"").Append(Drawio.CalloutStroke.GetValueOrDefault(c.Shape, "none"))
+              .Append('"').Append(dash).Append(" data-kind=\"callout\"/>");
+        }
+
+        // verticalAlign=top / spacingTop=6 / spacingLeft=8，与 drawio 的 CalloutStyle 间距对齐
+        sb.Append(TextEl(
+            c.X + 8,
+            c.Y + 6 + (size * 0.75),
+            CalloutLines(c),
+            size,
+            "start",
+            "#222222",
+            c.Shape == "band" ? "bold" : null));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 边上显示的文字：内联边用被折叠信号的 unit（退回 name），其余仍是 rw。
+    ///
+    /// <paramref name="rwLabels"/> 为 false 时去掉 read/write —— 与
+    /// <see cref="Drawio.InlineEdgeLabel"/> 同一套口径；注意<b>不剥</b>内联边的语义标签：
+    /// 那是信号名，不是冗余的方向说明。
+    /// </summary>
+    private static string EdgeLabel(Model model, Edge e, bool rwLabels)
+    {
+        if (e.Rw == "inline" && !string.IsNullOrEmpty(e.Sig))
+        {
+            var sig = model.SignalOrNull(e.Sig);
+            if (sig is not null)
+            {
+                return sig.Unit.Length > 0 ? sig.Unit : sig.Name;
+            }
+        }
+
+        return rwLabels ? e.Rw : "";
+    }
+
+    /// <summary>内联边沿用被折叠信号的 <c>Style</c> 片段里的线色；取不到就用默认色。</summary>
+    private static string EdgeColorOf(Model model, Edge e)
+    {
+        if (e.Rw != "inline" || string.IsNullOrEmpty(e.Sig))
+        {
+            return EdgeColor;
+        }
+
+        var sig = model.SignalOrNull(e.Sig);
+        var m = StrokeRe.Match(sig?.Style ?? "");
+        return m.Success ? m.Groups[1].Value : EdgeColor;
+    }
+
+    /// <summary>
+    /// 边的折线点。<b>这里就是与 drawio 分道扬镳的地方</b>（见模块头）。
+    ///
+    /// 两端取节点中心；没有人工拐点时补一个中点直角折弯，让线看起来像正交路由。
+    /// 不做任何障碍检测。直线模式直接连两点，不补肘点；人工拐点同样保留。
+    /// </summary>
+    private static List<(double X, double Y)> EdgePoints(Model model, Edge e, bool straightEdges = false)
     {
         INode? src = model.SignalOrNull(e.Src) ?? (INode?)model.FuncOrNull(e.Src);
         INode? dst = model.SignalOrNull(e.Dst) ?? (INode?)model.FuncOrNull(e.Dst);
@@ -86,6 +164,11 @@ internal static class Svg
         var pts = new List<(double X, double Y)> { (src.X + (src.W / 2.0), src.Y + (src.H / 2.0)) };
         pts.AddRange(e.Waypoints);
         pts.Add((dst.X + (dst.W / 2.0), dst.Y + (dst.H / 2.0)));
+        if (straightEdges)
+        {
+            return pts;
+        }
+
         if (pts.Count == 2)
         {
             var (x1, y1) = pts[0];
@@ -97,16 +180,18 @@ internal static class Svg
         return pts;
     }
 
-    public static string ToSvg(Model model, double padding = 24)
+    public static string ToSvg(Model model, double padding = 24, bool cards = false, bool rwLabels = true, bool straightEdges = false)
     {
         Drawio.AssignDefaultPositions(model);
-        var ents = Drawio.Entities(model).Select(t => t.Node).ToList();
+        // Drawio.Entities 已经跳过被 inline 折叠的信号：否则图上剩一堆没有边的空椭圆
+        var entities = Drawio.Entities(model);
+        var ents = entities.Select(t => t.Node).ToList();
 
         // 预览图只画**顶层**容器，与 Python `svg.py` / TypeScript `svg.ts` 一致：
         // 它们也是按 Group（path 的第一段）分组的。嵌套层级只在 .drawio 里体现，
         // 改这里会让三语言的 SVG 分叉。
         var groups = new Dictionary<string, List<INode>>(StringComparer.Ordinal);
-        foreach (var (_, e) in Drawio.Entities(model))
+        foreach (var (_, e) in entities)
         {
             var key = e.Group.Length > 0 ? e.Group : "misc";
             if (!groups.TryGetValue(key, out var list))
@@ -120,15 +205,19 @@ internal static class Svg
 
         var boxes = groups.ToDictionary(g => g.Key, g => Drawio.ContainerBox(g.Value), StringComparer.Ordinal);
 
-        var xs = ents.Select(e => e.X).Concat(boxes.Values.Select(b => b.X)).ToList();
-        var ys = ents.Select(e => e.Y).Concat(boxes.Values.Select(b => b.Y)).ToList();
-        var x2 = ents.Select(e => e.X + e.W).Concat(boxes.Values.Select(b => b.X + b.W)).ToList();
-        var y2 = ents.Select(e => e.Y + e.H).Concat(boxes.Values.Select(b => b.Y + b.H)).ToList();
-
         if (ents.Count == 0)
         {
             return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\" viewBox=\"0 0 1 1\"></svg>";
         }
+
+        // 文字块也计入画布范围：否则一张主要靠文字说明的图会被裁得只剩卡片
+        var calloutXs = model.Callouts.SelectMany(c => new[] { c.X, c.X + c.W }).ToList();
+        var calloutYs = model.Callouts.SelectMany(c => new[] { c.Y, c.Y + c.H }).ToList();
+
+        var xs = ents.Select(e => e.X).Concat(boxes.Values.Select(b => b.X)).Concat(calloutXs).ToList();
+        var ys = ents.Select(e => e.Y).Concat(boxes.Values.Select(b => b.Y)).Concat(calloutYs).ToList();
+        var x2 = ents.Select(e => e.X + e.W).Concat(boxes.Values.Select(b => b.X + b.W)).Concat(calloutXs).ToList();
+        var y2 = ents.Select(e => e.Y + e.H).Concat(boxes.Values.Select(b => b.Y + b.H)).Concat(calloutYs).ToList();
 
         var minx = xs.Min() - padding;
         var miny = ys.Min() - padding;
@@ -145,6 +234,7 @@ internal static class Svg
           .Append("orient=\"auto-start-reverse\"><path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"").Append(EdgeColor)
           .Append("\"/></marker></defs>");
 
+        // 先画容器，再画 band，再画节点，最后画说明与边——SVG 无 z-index，顺序即层级
         foreach (var g in boxes.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
             var (ox, oy, ow, oh) = boxes[g];
@@ -155,16 +245,32 @@ internal static class Svg
             sb.Append(TextEl(ox + 12, oy + (Drawio.Header / 2.0), [g], 13, "start", "#222222", "bold"));
         }
 
-        foreach (var (kind, e) in Drawio.Entities(model).OrderBy(t => t.Node.Id, StringComparer.Ordinal))
+        foreach (var c in model.Callouts.Where(c => c.Shape == "band"))
+        {
+            sb.Append(CalloutSvg(c));
+        }
+
+        foreach (var (kind, e) in entities.OrderBy(t => t.Node.Id, StringComparer.Ordinal))
         {
             var cx = e.X + (e.W / 2.0);
             var cy = e.Y + (e.H / 2.0);
+            var isCard = kind == "func" && cards && ((Func)e).Asset.Length > 0;
             if (kind == "signal")
             {
                 sb.Append("<ellipse cx=\"").Append(Text.Num(cx)).Append("\" cy=\"").Append(Text.Num(cy))
                   .Append("\" rx=\"").Append(Text.Num(e.W / 2.0)).Append("\" ry=\"").Append(Text.Num(e.H / 2.0))
                   .Append("\" fill=\"").Append(SignalFill).Append("\" stroke=\"").Append(SignalStroke)
                   .Append("\" data-kind=\"signal\"/>");
+            }
+            else if (isCard)
+            {
+                // 设备卡片：图片占满节点框。preserveAspectRatio="none" 与 imageAspect=0
+                // 同义：跟着框变形，不留等比白边。
+                var asset = ((Func)e).Asset;
+                sb.Append("<image x=\"").Append(Text.Num(e.X)).Append("\" y=\"").Append(Text.Num(e.Y))
+                  .Append("\" width=\"").Append(Text.Num(e.W)).Append("\" height=\"").Append(Text.Num(e.H))
+                  .Append("\" preserveAspectRatio=\"none\" href=\"").Append(Text.HtmlEscape(asset))
+                  .Append("\" data-kind=\"image\"/>");
             }
             else
             {
@@ -176,22 +282,46 @@ internal static class Svg
                   .Append('"').Append(dash).Append(" data-kind=\"func\"/>");
             }
 
-            sb.Append(TextEl(cx, cy, NodeLines(kind, e)));
+            if (isCard)
+            {
+                // 卡片标签只有一行（对应 drawio 的 verticalLabelPosition=bottom）
+                var f = (Func)e;
+                sb.Append(TextEl(cx, e.Y + e.H + 16, [f.Alias.Length > 0 ? f.Alias : f.Name], 13, weight: "bold"));
+            }
+            else
+            {
+                sb.Append(TextEl(cx, cy, NodeLines(kind, e)));
+            }
+        }
+
+        // 说明文字后画，压在卡片上面
+        foreach (var c in model.Callouts.Where(c => c.Shape != "band"))
+        {
+            sb.Append(CalloutSvg(c));
         }
 
         foreach (var e in model.Edges)
         {
-            var pts = EdgePoints(model, e);
+            var pts = EdgePoints(model, e, straightEdges);
             if (pts.Count == 0)
             {
                 continue;
             }
 
             sb.Append("<path d=\"M ").Append(string.Join(" L ", pts.Select(p => Text.Num(p.X) + " " + Text.Num(p.Y))))
-              .Append("\" fill=\"none\" stroke=\"").Append(EdgeColor)
+              .Append("\" fill=\"none\" stroke=\"").Append(EdgeColorOf(model, e))
               .Append("\" stroke-width=\"1.4\" marker-end=\"url(#arrow)\" data-edge=\"1\"/>");
-            var (mx, my) = pts[pts.Count / 2];
-            sb.Append(TextEl(mx, my - 8, [e.Rw], 10, "middle", "#444444"));
+
+            // 标签可能被 --no-rw-labels 关掉；空标签不落文字，免得留下一堆空 <text>
+            var label = EdgeLabel(model, e, rwLabels);
+            if (label.Length > 0)
+            {
+                var (mx, my) = pts[pts.Count / 2];
+                // 这里**不做**平行边的标签去叠印（.drawio 侧做了，见 SeparateLabels）。
+                // 原因：SVG 的一致性测试不得断言边几何，标签位置同理；只改一侧会制造
+                // 预览与 .drawio 的差异。要动就得三份一起动，那是另一件事。
+                sb.Append(TextEl(mx, my - 8, [label], 10, "middle", "#444444"));
+            }
         }
 
         sb.Append("</svg>");

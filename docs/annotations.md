@@ -47,7 +47,7 @@ The declaration is recognised by a line-oriented regular expression, one declara
 - **One declaration per line, terminated by `;`.** The trailing semicolon is part of the match; a declaration split across lines is not recognised.
 - **The declaration must carry `@drawcode`.** A comment block with no annotation, or an annotation on a construct that is not a top-level variable, produces no signal at all.
 - **Array declarators are folded into the type.** `float g_coeff[32];` yields `name = g_coeff` and `ctype = float[32]`; the suffix is reattached to the type, so the label reads `float[32] / in / coeff`.
-- **Signals accept every key in the signal table below, geometry included.** `xy`, `size` and `style` are read on a variable exactly as they are on a function — but only by the TypeScript front ends, so read [Where the geometry keys actually take effect](#where-the-geometry-keys-actually-take-effect) before relying on them.
+- **Signals accept every key in the signal table below, geometry included.** `xy`, `size` and `style` are read on a variable exactly as they are on a function, by every front end and every implementation — see [Where the geometry keys actually take effect](#where-the-geometry-keys-actually-take-effect).
 
 ## Direction in C#: the `[Drawcode]` attribute
 
@@ -100,7 +100,7 @@ In C, consecutive `///` lines accumulate and are **flushed** when a non-`///`, n
 Key/value pairs in C are read by `(\w+)\s*=\s*"([^"]*)"`: **keys are bare words, values are double-quoted, and a value may not contain a double quote.** In C# the keys are named attribute properties. Unknown keys are silently ignored rather than raising, which keeps annotations forward-compatible across implementations.
 ## Key reference: signals
 
-Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-attributed fields and properties in C#. The first five keys behave identically in both languages and in every implementation; the last three are geometry, and **TypeScript is the only implementation that reads them**. `dir` is documented above.
+Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-attributed fields and properties in C#. All keys behave identically in both languages and in every implementation; the last three are geometry, read by every front end on both entity kinds. `dir` is documented above.
 
 | Key | Type | Default | Effect | Example |
 | :--- | :--- | :--- | :--- | :--- |
@@ -108,9 +108,9 @@ Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-at
 | `alias` | string | `""` | Human name used as a **custom attribute** on the node (not in the label). The label always shows the C identifier. | `alias="原始采样值"` |
 | `note` | string | `""` | Free-text remark, written to the `<object>` custom attributes. Not rendered in the label. | `note="上电后需校准"` |
 | `external` | `"true"` / absent | `false` | Marks the signal as coming from outside the module set. Parsed as the string `"true"`; any other value, including `"True"`, leaves it `false`. | `external="true"` |
-| `xy` | `"x,y"` | unset | Absolute canvas coordinates, overriding the default stacking for this node. **TypeScript only** (see below). | `xy="420,160"` |
-| `size` | `"WxH"` | `160x60` on a signal, `180x72` on a function | Initial node size; separator is a lowercase `x`. **TypeScript only.** | `size="180x72"` |
-| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string (role colouring and the like). **TypeScript only.** An empty value leaves the output byte-identical. | `style=";fillColor=#e8f0fe"` |
+| `xy` | `"x,y"` | unset | Absolute canvas coordinates, overriding the default stacking for this node. | `xy="420,160"` |
+| `size` | `"WxH"` | `160x60` on a signal, `180x72` on a function | Initial node size; separator is a lowercase `x`. | `size="180x72"` |
+| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string (role colouring and the like). An empty value leaves the output byte-identical. | `style=";fillColor=#e8f0fe"` |
 
 The label is assembled as `name` on the first line and `ctype / dir / unit` on the second, skipping empty parts — so a signal with no `unit` reads `int16_t / in`, not `int16_t / in / `.
 
@@ -127,7 +127,7 @@ Applies to function declarations in C and to methods in C#.
 | `external` | `"true"` / absent | `false` | Switches the node style to the dashed external form. | `external="true"` |
 | `xy` | `"x,y"` | unset | Initial node position on the canvas, in absolute canvas coordinates. Overrides the default stacking for this node. | `xy="420,160"` |
 | `size` | `"WxH"` | `180x72` | Initial node size. The separator is a lowercase `x`; the value is lowercased before splitting, so `180X72` also works. | `size="180x72"` |
-| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string. **TypeScript only**, same as the signal row. | `style=";fillColor=#dae8fc"` |
+| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string, same as the signal row. | `style=";fillColor=#dae8fc"` |
 
 Do not mix the separators up: `xy` takes a comma, `size` takes a **lowercase `x`**. Writing the
 wrong one does **not** raise — it yields a node with `NaN` size, positioned at `(NaN, NaN)` and
@@ -135,29 +135,23 @@ sized `(NaN, NaN)`, which is invisible in draw.io.
 
 ### Where the geometry keys actually take effect
 
-The three keys work the same way in **both** languages and on **both** entity kinds — it is the
-*implementation* that decides whether they are read at all. That distinction is the whole story, and
-this section used to get it wrong in two different directions, so here is the table and nothing
-shorter:
+All three keys are read by **every** front end, in a `.c` and in a `.cs`, on signals and on functions.
+Earlier revisions read `xy`/`size` only in the function branch, only on some front ends, and never
+read `style`; those gaps are closed in all three implementations now. The rules are identical
+everywhere:
 
-| | TypeScript (`cparse.ts` / `csparse.ts`) | Reference implementation (`cparse.py` / `csparse.py` / `CsParse.cs`) |
-| :--- | :--- | :--- |
-| `xy` / `size` on a **function** | read, honoured | C: read, honoured. **C#: not read at all** |
-| `xy` / `size` on a **signal** | read, honoured | **not read at all** — `cparse.py` reads the pair inside its function branch only |
-| `style`, any entity | read, appended to the node style | **not read at all** |
-| written back by `sync` | yes, for entities whose geometry the diagram changed — see [Write-back](#write-back) | **nothing** |
+- a missing key or an empty string leaves the entity's default untouched;
+- a malformed value does **not** raise — it becomes `NaN`, and a node with `NaN` geometry is invisible
+  in draw.io;
+- `xy` splits on a comma, `size` on a lowercase `x` (the value is lowercased first, so `180X72` is
+  accepted);
+- conversion follows JavaScript `Number()`, not Python `float()` or .NET `double.Parse` — the three
+  strings where those differ (`"1_0"`, `"infinity"`, `"0x10"`) are covered by parity tests.
 
-The second row is the one that bites. `cparse.py` reads `xy` **after** its signal loop, in the
-function branch, so `/// @drawcode xy="420,160"` on a variable is parsed and then dropped; the signal
-goes back to being stacked by the default algorithm. `csparse.py` says outright in its own header
-that its `[Drawcode]` has no `Size` property and that it never calls `meta.get("xy")`, so every method
-*it* parses is placed by the default algorithm too.
-
-**Every implementation ignores unknown keys rather than raising**, so none of this announces itself:
-you switch implementation and the diagram changes shape with no error, and the IR is identical
-either way — L1 in `conformance.md` deliberately excludes `x`/`y`/`w`/`h`, so no golden case can catch
-it. See Known divergence in `conformance.md` before assuming two implementations agree on a source
-that carries geometry.
+`sync` writes the pair back too, for entities whose diagram geometry differs from what `build` would
+have written — see [Write-back](#write-back). Because every implementation ignores unknown keys
+rather than raising, these behaviours are pinned by dedicated unit tests rather than by the goldens:
+`expected.ir.json` deliberately records no coordinates, so L1 cannot catch a regression.
 
 Do not confuse these with the `size` key on `@device` / `[Device]`, which is the physical package size of a part and **is** read on both sides — they are different keys that happen to share a name.
 
@@ -226,9 +220,12 @@ Three things surprise people:
 2. **Dragging a text block does not round-trip.** `applyLayout` only resolves node and function ids
    and skips anything else. Move the block in draw.io, rebuild with `--layout-from`, and it **snaps
    back to the `Xy` in the source**. To move it, edit the source.
-3. **Only the TypeScript C# front end knows this attribute.** Neither `csparse.py` nor `CsParse.cs`
-   reads `CalloutAttribute`, and both ignore unknown attributes rather than raising — so running the
-   same source through another implementation drops the text blocks **entirely and silently**.
+3. **All three C# front ends know this attribute; the C front end does not.** `CalloutAttribute` is
+   parsed by `csparse.ts`, `csparse.py` and `CsParse.cs` alike, and the parse-dispatch merge
+   concatenates their lists. There is no C equivalent in any implementation — a `///` comment block
+   has no natural place to carry several independent, absolutely-positioned rectangles. Unknown
+   attributes are still ignored rather than raising, so a misspelt property degrades silently; the
+   attribute itself no longer does.
 
 ## Image cards: `--cards`
 
@@ -315,8 +312,10 @@ These rules need no annotation because they follow from the code's structure.
 | `style` | **never** — it is an input-only key, like `clientX` on an element |
 | function **body** | **never** — this is the design constraint, not a gap |
 
-**TypeScript only.** Neither `cparse.py`/`codegen.py` nor the .NET side writes geometry back, so a
-diagram you rearrange round-trips through TypeScript and silently does not through the others.
+All three implementations write the pair back, and all three merge at **parameter level**: a
+hand-written `Style`, a compact `Unit="LSB"` or a `[Device]` line above the attribute survives
+untouched, and only the keys whose values actually changed are rewritten. `sync` therefore
+round-trips a rearranged diagram through any of the three, not just TypeScript.
 
 The geometry row is conditional, and the condition is what keeps `sync` honest. `applyLayout` is the
 one place that holds both numbers — what the diagram now says, and what `build` would have written

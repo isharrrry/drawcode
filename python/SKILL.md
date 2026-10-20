@@ -37,17 +37,21 @@
 
 ```
 Model
-├── signals: {id -> Signal}     id 形如 "adc.h::g_raw"
-├── funcs:   {id -> Func}       id 形如 "adc.h::adc_read"
-├── edges:   [Edge]             ← rebuild_edges() 从 reads/writes 派生
-├── devices: {func_id -> Device}
-└── files:   [相对路径]
+├── signals:  {id -> Signal}     id 形如 "adc.h::g_raw"
+├── funcs:    {id -> Func}       id 形如 "adc.h::adc_read"
+├── edges:    [Edge]             ← rebuild_edges() 从 reads/writes 派生
+├── devices:  {func_id -> Device}
+├── callouts: [Callout]          ← C# 前端的 [Callout(...)]，列表不是字典
+├── pinned:   {id -> PinnedGeom} ← apply_layout 记下的「人拖过」几何，供回写
+└── files:    [相对路径]
 
 Signal: id, name, ctype, dir(in/out/inout), file, line, unit, alias, note,
-        external, group, x, y, w, h
+        external, group, path, style, x, y, w, h
 Func:   id, name, ret, params[Param], file, line, alias, note, tooltip,
-        asset, external, group, reads[], writes[], calls[], x, y, w, h
-Edge:   src, dst, rw(read/write), waypoints[(x, y)]
+        asset, external, group, path, style, reads[], writes[], calls[], x, y, w, h
+Edge:   src, dst, rw(read/write|inline), waypoints[(x, y)], sig(被折叠的信号 id)
+Callout: id, text, owner, shape(text|box|band), font_size, x, y, w, h
+PinnedGeom: xy?[x, y], size?[w, h]   ← 两个键各自独立，只记真正变过的
 
 Param:  name, ctype, dir
 Device: vendor, model, spec, size, asset
@@ -109,7 +113,7 @@ sync_source(path, model, rel) ← 逐文件回写
 
 | 人在 draw.io 里做的 | 回写结果 |
 | :--- | :--- |
-| 拖动/缩放节点 | 只更新图内布局，**代码不动** |
+| 拖动/缩放节点 | 下一次 `sync --write` 把 `xy`/`size` 写回声明层；`build` 之后沿用该坐标 |
 | 拉折线、改连接点 | 存进 `<Array as="points">`，**代码不动** |
 | 改 `alias`/`unit`/`note`/`tooltip` | 原地更新源码注释块 |
 | 改 `dir` | 把 `dir=in` 改写成 `dir=out`/`dir=io`（C），或改 `Direction.X`（C#） |
@@ -167,10 +171,12 @@ Python 3 的 `re` 默认 `\w` 匹配 Unicode 单词字符。移植到 JS（不�
 
 ```bash
 cd python
-python -m unittest discover -s tests -t .          # 124 tests，0 skipped
+python -m unittest discover -s tests -t .          # 144 tests，0 skipped
 ```
 
-测试规模：C 解析 12、C# 解析 10、drawio 往返 15、代码回写 11+、XSD 校验 3、端到端幂等 4、SVG 6。
+测试规模：144 条，覆盖 C/C# 解析、drawio 往返、代码回写、adopt、CLI、SVG 与 XSD；
+其中 `test_ts_parity.py` 的 20 条专门钉住「三实现行为一致」这件事本身（几何读取、
+`[Callout]`、标签去叠印、sync 几何回写、四个渲染开关）。
 
 ## 八、给这门工具加一门新源语言
 

@@ -58,7 +58,7 @@ cd dotnet && dotnet test                                   # see dotnet/ for bui
 本仓库里 Python 测试套件的一次运行：
 
 ```
-Ran 124 tests in 0.556s
+Ran 144 tests in 0.697s
 
 OK
 ```

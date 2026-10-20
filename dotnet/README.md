@@ -19,7 +19,7 @@ numbers are comparable. See `../docs/conformance.md` for what "agree" means and
 ```bash
 cd dotnet
 dotnet build DrawCode.slnx             # 0 warnings, 0 errors
-dotnet test  DrawCode.slnx             # 78 tests, 0 skipped
+dotnet test  DrawCode.slnx             # 119 tests, 0 skipped
 dotnet build DrawCode.slnx -c Release  # same, warnings-as-errors on
 ```
 
@@ -27,7 +27,8 @@ dotnet build DrawCode.slnx -c Release  # same, warnings-as-errors on
 
 ```bash
 # source code -> .drawio
-dotnet run --project src/DrawCode -- build <file>... [--root DIR] [--out FILE] [--svg FILE]
+dotnet run --project src/DrawCode -- build <file>... [--root DIR] [--out FILE] [--merge]
+    [--svg FILE] [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 
 # reuse the hand-made layout of an existing diagram, and export an SVG preview
 dotnet run --project src/DrawCode -- build adc.h adc.c dsp.h dsp.c \
@@ -40,11 +41,15 @@ dotnet run --project src/DrawCode -- sync flow.drawio adc.h adc.c dsp.h dsp.c --
 dotnet run --project src/DrawCode -- dump-ir adc.h adc.c dsp.h dsp.c --root . --out flow.ir.json
 ```
 
+The build switches (`--merge`, `--inline`, `--cards`, `--no-rw-labels`, `--straight-edges`) match
+the Python and TypeScript CLIs name for name and semantics; `../docs/implementations.md` spells out
+what each does. With none of them passed, the output is byte-identical to the pre-switch behaviour.
+
 What survives a round trip:
 
 | You do this in draw.io | Result |
 | :--- | :--- |
-| Drag / resize a node | Layout updates in the `.drawio` only; **code is untouched** (layout is not stored in source) |
+| Drag / resize a node | The next `sync --write` records `Xy` / `Size` in the declaration; subsequent `build` runs reuse that geometry |
 | Drag a bend or change a connection point | Stored in `<Array as="points">`; code untouched |
 | Edit `alias` / `unit` / `note` / `tooltip` | The source annotation is rewritten in place |
 | Change `dir` | The `dir=` key is rewritten (`dir=in` / `dir=out` / `dir=io`), or `Direction.X` inside `[Drawcode(...)]` in C# |
@@ -80,11 +85,11 @@ dotnet/
 │   ├── Model.cs               IR: Signal, Param, Func, Edge, Device, Model
 │   ├── Text.cs                SplitLines / HtmlEscape / Num / BOM-preserving file IO
 │   ├── CParse.cs              C  -> IR  (@drawcode dir=, @device, plain declarations)
-│   ├── CsParse.cs             C# -> IR  ([Drawcode(...)], [Device(...)])
+│   ├── CsParse.cs             C# -> IR  ([Drawcode(...)], [Device(...)], [Callout(...)])
 │   ├── ParseDispatch.cs       extension dispatch + multi-language merge
 │   ├── Drawio.cs              IR <-> .drawio  (placement, routing, emit, read-back, compressed)
 │   ├── IrJson.cs              canonical IR JSON for L1 comparison
-│   ├── CodeGen.cs             IR -> source, declaration layer only
+│   ├── CodeGen.cs             IR -> source, declaration layer only (incl. Xy/Size write-back)
 │   ├── Svg.cs                 IR -> SVG preview (shares node layout with .drawio, not edge routing)
 │   ├── Cli.cs, Program.cs     build / sync / dump-ir
 └── tests/DrawCode.Tests/      xunit: parse, drawio, codegen, edit-back, svg, conformance

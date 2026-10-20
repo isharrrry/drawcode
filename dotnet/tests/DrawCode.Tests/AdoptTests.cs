@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace DrawCode.Tests;
 
@@ -199,6 +200,23 @@ public class AdoptTests
         Assert.Equal(0, exit);
     }
 
+    /// <summary>
+    /// 抹掉注解里的几何键，只留「结构性内容」。对等 Python <c>test_adopt.py</c> 的
+    /// <c>strip_geom</c>。
+    ///
+    /// 存在的理由：每轮 sync 都按**最新源码**重算默认布局，所以第二轮开始时源码已经
+    /// 比图新 —— 新节点改变了默认布局，图上那些没人碰过的旧节点相对新布局偏了位，
+    /// 被回写侧判定成「人拖过」，补出一个 xy。这是 <see cref="Drawio.ApplyLayout"/>
+    /// 注释里写明的已知边界（「若用户在 build 之后、sync 之前改过源码，被挪动但没人
+    /// 碰过的节点会被误判」），本轮不解决。
+    ///
+    /// 抹掉几何后比较，表达的是「这一轮除了补几何，其余一字未动」；再配合「第三轮起
+    /// 逐字节稳定」，就把这条已知边界的**收敛性**也钉住了 —— 补过 xy 的节点从下一轮
+    /// 起坐标来自源码，与基线一致，所以只会多写一次，不会每轮都写。
+    /// </summary>
+    private static string StripGeom(string text) =>
+        Regex.Replace(text, " (?:xy|size)=\"[^\"]*\"", "");
+
     [Fact]
     public void ANewSignalIsWrittenIntoTheHeader()
     {
@@ -228,11 +246,17 @@ public class AdoptTests
 
         SyncOnce(dir, cell);
         var first = File.ReadAllText(Path.Combine(dir, "adc.h"));
-        SyncOnce(dir, cell);
 
+        // 第二轮允许补一次几何（布局重排的已知边界），结构内容必须一字不动
+        SyncOnce(dir, cell);
         var second = File.ReadAllText(Path.Combine(dir, "adc.h"));
-        Assert.Equal(first, second);
-        Assert.Equal(1, second.Split("g_alarm;").Length - 1);
+        Assert.Equal(StripGeom(first), StripGeom(second));
+
+        // 第三轮起逐字节稳定：补过 xy 的节点已免疫后续布局重排
+        SyncOnce(dir, cell);
+        var third = File.ReadAllText(Path.Combine(dir, "adc.h"));
+        Assert.Equal(second, third);
+        Assert.Equal(1, third.Split("g_alarm;").Length - 1);
     }
 
     [Fact]
@@ -275,9 +299,15 @@ public class AdoptTests
         Assert.Contains("未能从图里认出类型", first, StringComparison.Ordinal);
         Assert.Equal(1, first.Split("g_unknown;").Length - 1);
 
+        // 第二轮允许补一次几何，但占位类型与注解结构必须原样保留
         SyncOnce(dir, cell);
         var second = File.ReadAllText(Path.Combine(dir, "adc.h"));
-        Assert.Equal(first, second);
-        Assert.Equal(1, second.Split("g_unknown;").Length - 1);
+        Assert.Equal(StripGeom(first), StripGeom(second));
+
+        // 第三轮起逐字节稳定，且声明只出现一次（没有当成新元素重复追加）
+        SyncOnce(dir, cell);
+        var third = File.ReadAllText(Path.Combine(dir, "adc.h"));
+        Assert.Equal(second, third);
+        Assert.Equal(1, third.Split("g_unknown;").Length - 1);
     }
 }

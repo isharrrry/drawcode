@@ -58,7 +58,7 @@ cd dotnet && dotnet test                                   # see dotnet/ for bui
 A run of the Python suite in this repository:
 
 ```
-Ran 124 tests in 0.556s
+Ran 144 tests in 0.697s
 
 OK
 ```

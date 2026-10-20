@@ -56,7 +56,9 @@ public sealed class Signal : INode
     public string Alias { get; set; } = "";
     public string Note { get; set; } = "";
     public bool External { get; set; }
-    public string Group { get; set; } = "";
+    public string Group { get; set; } = "";   // path 的第一段，旧代码只看这个
+    public string Path { get; set; } = "";    // "adc/采样前端" 这样的容器层级
+    public string Style { get; set; } = "";   // 原样追加到节点样式串末尾
     public double X { get; set; }  public double Y { get; set; }
     public double W { get; set; } = 160;  public double H { get; set; } = 60;
 }
@@ -68,12 +70,18 @@ public sealed class Func : INode
     required Id, Name;
     string Ret = "void";  List<Param> Params = [];  string File = "";  int Line;
     string Alias, Note, Tooltip, Asset;
-    bool External;  string Group;
+    bool External;  string Group, Path, Style;
     List<string> Reads = [], Writes = [], Calls = [];
     double X, Y;  double W = 180, H = 72;
 }
 
-public sealed class Edge   { required Src, Dst; string Rw = "read"; List<(double X, double Y)> Waypoints = []; }
+// [Callout(...)]：不参与连线的文字块。列表而非字段 —— 一个声明可挂多块。
+public sealed class Callout { required Id; string Text, Owner, Shape = "text"; double FontSize, X, Y; double W = 200, H = 40; }
+
+// apply_layout 记下的「人拖过」几何；两个键各自可为空。
+public sealed class PinnedGeom { List<double>? Xy, Size; }
+
+public sealed class Edge   { required Src, Dst; string Rw = "read"; string? Sig; List<(double X, double Y)> Waypoints = []; }
 public sealed class Device { string Vendor, Model, Spec, Size, Asset; }
 
 public sealed class Model
@@ -82,8 +90,13 @@ public sealed class Model
     Dictionary<string, Func>   Funcs;
     List<Edge> Edges;                     // derived, never authored
     Dictionary<string, Device> Devices;
+    List<Callout> Callouts;               // C# 前端产出，合并时 AddRange
+    HashSet<string> Inlined;              // --inline 折叠掉的信号：渲染器必须跳过
+    Dictionary<string, (string Writer, string Reader)> InlinePairs;
+    Dictionary<string, PinnedGeom> Pinned; // 纯 build 永远为空
     List<string> Files;
-    void AddSignal(Signal); void AddFunc(Func); List<Edge> RebuildEdges();
+    void AddSignal(Signal); void AddFunc(Func); void AddCallout(Callout);
+    List<Edge> RebuildEdges();
 }
 ```
 
@@ -180,7 +193,7 @@ for more than 3px is.
 
 ```bash
 cd dotnet
-dotnet test DrawCode.slnx            # 78 tests, 0 skipped
+dotnet test DrawCode.slnx            # 119 tests, 0 skipped
 dotnet build DrawCode.slnx -c Release   # 0 warnings, 0 errors
 ```
 

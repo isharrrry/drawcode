@@ -190,21 +190,20 @@ typescript/
 
 ## 与 Python 版的已知差异
 
-**几何结果无差异**（两个金标准全部逐字节相同）。以下是实现层面的差异：
+**几何结果无差异**（两个金标准全部逐字节相同）。以下是剩余的、纯实现层面的差异：
 
 | # | 差异 | 影响 |
 | :--- | :--- | :--- |
 | 1 | **XSD 校验器是手写子集**，Python 版用 lxml | 本 XSD 覆盖的构造全部支持；不在本 XSD 里的 XSD 特性（命名空间、`xs:import`、`xs:extension`、identity constraints）不支持。**不改判定结果**：9 个变异与 lxml 判断一致 |
 | 2 | **浮点打印**在指数区间依赖 `toExponential()` | 实际坐标只可能是整数或 `x.5`，两条路径一致；`num.test.ts` 单独覆盖了 `1e-5` / `1e21` 等边界 |
-| 3 | **C# 的 Unicode 名字是 TS 独有**：`csparse.ts` 的类型与名字位置都显式写 `[\p{L}]`，并整段跳过 `record` 声明；Python `csparse.py` 与 .NET `CsParse.cs` 的 C# 前端仍只认 ASCII | ASCII 源码三版结果一致；用中文信号名/组件方法名的源码目前只有 TS 能正确出图，另两版会**静默丢节点**。要三版对齐，需把同样的 IDENT 与 record 跳过逻辑移植过去 |
-| 4 | **`String.replace` 只替换第一处** | 仅影响测试代码写法（用 `replaceAll`）；生产代码没有依赖"全替换"的地方 |
-| 5 | **CLI 参数解析**用 `node:util.parseArgs` | 覆盖 `build` / `sync` 的全部选项；差异在帮助文本措辞。退出码约定一致（成功 0、用法错误 2） |
-| 6 | **`str.splitlines()` / 排序 / `repr`** 均为手写等价物 | 已在 `fsutil.ts` / `order.ts` / `num.ts` 中逐条对齐并测试 |
-| 7 | **边标签去叠印是 TS 独有** | 两条边的标签会撞在一起时，TS 把文字挪进 `eN_label` 子单元格；另外两版把标签全留在边上，同样的输入会叠字。金标准里没有一对撞上的标签，所以这条不会被一致性测试照出来 |
-| 8 | **C# 前端的 `Xy` / `Size` / `Style` 与 `[Callout]` 是 TS 独有** | 设备总览图需要钉死坐标与自由文本框。Python 的 `csparse.py` 与 .NET 的 `CsParse.cs` 都不认这些键，且都是**忽略未知属性**而非报错 —— 喂给它们只会得到一张少了说明框、且没有报错的图 |
+| 3 | **`String.replace` 只替换第一处** | 仅影响测试代码写法（用 `replaceAll`）；生产代码没有依赖"全替换"的地方 |
+| 4 | **CLI 参数解析**用 `node:util.parseArgs` | 覆盖 `build` / `sync` 的全部选项；差异在帮助文本措辞。退出码约定一致（成功 0、用法错误 2） |
+| 5 | **`str.splitlines()` / 排序 / `repr`** 均为手写等价物 | 已在 `fsutil.ts` / `order.ts` / `num.ts` 中逐条对齐并测试 |
 
-第 7、8 条另见 `../docs/conformance.md` 的 Known divergence。第 8 条要改实现才算消除：
-`META_KEY` / `AttrKey` 里补键、两边都加 `CalloutAttribute` 解析。
+原先列在这里的三项已经消除：C# 的 Unicode 名字与 `record` 跳过（Python 与 .NET 都已对齐）、
+边标签去叠印（`eN_label` 子单元格 + `offset`），以及 C# 前端的 `Xy` / `Size` / `Style` /
+`[Callout]`（两份实现都已补齐，并各有测试）。见 `../docs/conformance.md` 的
+“Aligned extensions”。
 
 ---
 

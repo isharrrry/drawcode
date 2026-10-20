@@ -42,6 +42,10 @@ def parse_any(paths, root=None):
         merged.signals.update(sub.signals)
         merged.funcs.update(sub.funcs)
         merged.devices.update(sub.devices)
+        # callouts 是**列表**而不是按 id 覆盖的 dict：C 与 C# 各产出自己那份，
+        # 合并时必须 extend。早先漏了这一行，混合语言的图会静默丢掉全部文字块
+        # （单语言时 parts 只有一个、走上面的提前 return，所以问题只在混编时暴露）。
+        merged.callouts.extend(sub.callouts)
         merged.files.extend(sub.files)
     merged.rebuild_edges()
     return merged

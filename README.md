@@ -72,7 +72,8 @@ The equivalence table and the per-language test commands are in [`docs/implement
 ## Command-line usage
 
 ```
-drawcode build <files...> [--root DIR] [--out FILE] [--layout-from FILE] [--svg FILE]
+drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ```
 
@@ -80,6 +81,12 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 | :--- | :--- |
 | `build` | Parse sources → build IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout. `--svg` also emits a read-only preview sharing the same coordinates. |
 | `sync` | Read `.drawio` → apply layout and annotation attributes → write the **declaration layer** back to source. Dry run unless `--write` is passed. |
+
+`--inline` folds one-write/one-read signals into direct edges, `--cards` renders `asset`-bearing
+functions as image cards, `--no-rw-labels` drops the `read`/`write` edge labels, and
+`--straight-edges` replaces orthogonal routing with straight lines. All three implementations accept
+the same flags with the same semantics; without them the output is byte-identical to the old
+behaviour.
 
 ## Core concepts
 
@@ -116,7 +123,7 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ## Development
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 124 tests
+cd python && python -m unittest discover -s tests -t .    # 144 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -132,7 +139,7 @@ command in the same column.
 
 | Claim | How it was measured | Result |
 | :--- | :--- | :--- |
-| Python implementation is correct | `python -m unittest discover -s tests -t .` | **124 tests, 0 failures, 0 skipped** |
+| Python implementation is correct | `python -m unittest discover -s tests -t .` | **144 tests, 0 failures, 0 skipped** |
 | Compressed `.drawio` is read correctly | Read back a draw.io-compressed golden file | **nodes=6, edges=6, attrs=6** — identical to the plain form |
 | Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | raises `ValueError` |
 | Generated `.drawio` is schema-valid | `lxml` XMLSchema against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |

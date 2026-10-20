@@ -22,7 +22,7 @@ status: stable
 | 运行时依赖 | **无**（仅标准库） | **无**（没有 `node_modules`） | **无**（仅 BCL） |
 | 入口 | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | 测试 | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| 测试数量 | 75 | 107 | 79 |
+| 测试数量 | 144 | 175 | 119 |
 | 各实现指南 | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 表里的每条命令都在仓库根目录执行。每个实现目录另有一份 `README.md`，
@@ -33,7 +33,8 @@ status: stable
 三套都提供同样的两个操作：
 
 ```
-build <files...> [--root DIR] [--out FILE] [--layout-from FILE] [--svg FILE]
+build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 sync  <drawio> <files...> [--root DIR] [--write]
 ```
 
@@ -41,6 +42,11 @@ sync  <drawio> <files...> [--root DIR] [--write]
 | :--- | :--- |
 | `build` | 解析源码 → IR → 写出 `.drawio`。`--layout-from` 复用既有图的手工排版；`--svg` 额外产出一份预览。 |
 | `sync` | 读 `.drawio` → 应用排版与注解属性 → 只回写**声明层**。不给 `--write` 就是试跑。 |
+
+四个内容/排版开关在三份 CLI 上同名同义：`--inline` 把「一写一读」的信号折叠成设备直连边；
+`--cards` 把带 `asset` 的函数画成图片卡片；`--no-rw-labels` 去掉边上的 `read`/`write`；
+`--straight-edges` 用直线替代正交布线（人工拐点与出入锚点保留，自动肘点丢弃）。不带这些开关时
+产物与加开关之前逐字节相同 —— 这是共享金标准仍然有意义的前提。
 
 ## Python
 

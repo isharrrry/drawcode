@@ -16,6 +16,7 @@ internal static class Cli
         usage: drawcode <command> [options]
 
           build <file>... [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                          [--inline] [--cards] [--no-rw-labels] [--straight-edges]
               source code -> .drawio (one diagram per module unless --merge)
 
           sync <file.drawio> <file>... [--root DIR] [--write]
@@ -36,6 +37,12 @@ internal static class Cli
     {
         "--merge",
         "--write",
+        // build 的四个排版/内容开关：与 TS / Python 版同名同义。不带时产物与旧版
+        // 逐字节相同 —— 金标准依赖这一点，所以它们只可能「出现即为真」。
+        "--inline",
+        "--cards",
+        "--no-rw-labels",
+        "--straight-edges",
     };
 
     internal static int Run(string[] args)
@@ -216,6 +223,12 @@ internal static class Cli
 
         var layoutFrom = Opt(options, "--layout-from");
         var svgPath = Opt(options, "--svg");
+        // 四个开关都只表意「出现即开」；--no-rw-labels 的语义与 Python 的 store_false
+        // 相同 —— 默认开启（true），出现才关。
+        var inline = options.ContainsKey("--inline");
+        var cards = options.ContainsKey("--cards");
+        var rwLabels = !options.ContainsKey("--no-rw-labels");
+        var straightEdges = options.ContainsKey("--straight-edges");
 
         if (plans.Count > 1 && (layoutFrom is not null || svgPath is not null))
         {
@@ -231,6 +244,11 @@ internal static class Cli
         foreach (var plan in plans)
         {
             var model = ParseDispatch.ParseAny(plan.Files, root);
+
+            // 折叠「一写一读」的信号：设备之间直连，中间的信号节点不画。
+            // 放在布局之前是刻意的 —— 这是**图的内容**变了，不是排版变了，
+            // 少掉的节点必须由重新布局补位，而不是在原位留一个洞。
+            var folded = inline ? model.CollapseSignals() : 0;
 
             if (layoutFrom is not null)
             {
@@ -251,22 +269,28 @@ internal static class Cli
                 Drawio.ApplyLayout(model, layout);
             }
 
-            var outPath = WriteTo(plan.Out, Drawio.ToDrawio(model));
+            var outPath = WriteTo(plan.Out, Drawio.ToDrawio(model, cards, rwLabels, straightEdges));
 
             var svgNote = "";
             if (svgPath is not null)
             {
-                svgNote = " + " + WriteTo(svgPath, Svg.ToSvg(model));
+                svgNote = " + " + WriteTo(svgPath, Svg.ToSvg(model, cards: cards, rwLabels: rwLabels, straightEdges: straightEdges));
             }
 
+            // signals= 报的是**折叠前**的信号数：它和调用方看到的源码一一对应，
+            // 折了多少另用 folded= 报，否则这个数会随排版选项变化，没法当校验依据。
+            var inlineNote = inline
+                ? " folded=" + folded.ToString(CultureInfo.InvariantCulture)
+                : "";
             Console.Out.WriteLine(string.Format(
                 CultureInfo.InvariantCulture,
-                "signals={0} funcs={1} edges={2} -> {3}{4}",
+                "signals={0} funcs={1} edges={2} -> {3}{4}{5}",
                 model.Signals.Count,
                 model.Funcs.Count,
                 model.Edges.Count,
                 outPath,
-                svgNote));
+                svgNote,
+                inlineNote));
         }
 
         return 0;

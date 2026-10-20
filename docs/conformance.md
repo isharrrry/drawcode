@@ -116,41 +116,43 @@ selection and obstacle avoidance in `_route`. Consequences, stated plainly:
   shared function. Until then, both implementations reproduce the simplified behaviour, and SVG
   conformance tests must not assert edge geometry.
 
-**Known divergence — TypeScript carries extensions the other two do not have.** `docs/annotations.md`
-now documents these as available; they are not, everywhere. Stated plainly so nobody hunts a ghost:
+**Aligned extensions — all three implementations now agree.** These five behaviours used to be
+TypeScript-only. They are implemented identically in `python/` and `dotnet/`, and each side pins them
+with dedicated tests. The shared goldens still cannot see them — `expected.ir.json` deliberately
+records no coordinates (see *Golden cases*), and `small-c` contains no two labels close enough to
+clash — so a regression here would not turn the golden comparison red. That is why the behaviours are
+listed explicitly instead of being left implied by "the outputs match":
 
-- **Edge-label de-clashing is TypeScript-only.** When two edge labels would overlap, TS moves every
+- **Edge-label de-clashing.** When two edge labels would overlap, every implementation moves each
   label but the first out of its edge and into a sibling `<mxCell id="eN_label" … parent="eN">`,
   where `<mxPoint as="offset">` holds a purely vertical shift, and blanks the edge object's own
-  `label`. Python and .NET leave every label inline on its edge, so the same input yields more cells
-  and visibly stacked text. The shared golden case (`small-c`) contains no two labels close enough
-  to clash, so conformance stays green — which is precisely why this is written down instead of left
-  to be found in the field.
-- **Geometry — `xy`, node `size`, `style` — is read by TypeScript only, on both front ends and both
-  entity kinds.** One mechanism, one bullet: `cparse.py` reads `xy`/`size` on **functions only** (its
-  signal loop is already finished by the time the geometry is read, so a `xy` written on a variable is
-  parsed and dropped), `csparse.py` never calls `meta.get("xy")` at all and says so in its own header,
-  `CsParse.cs` likewise, and **neither Python nor .NET reads `style`**. TypeScript honours all three in a
-  `.c` *and* in a `.cs`, on signals *and* on functions, because the device-level overview diagrams
-  need pinned geometry and per-role colour.
-- **`[Callout]` exists only in TypeScript's C# front end.** Neither `csparse.py` nor `CsParse.cs`
-  knows `CalloutAttribute`. This is the same class of divergence as the bullet above and is listed
-  separately only because the consequence is larger — a whole layer of the drawing disappears.
-- Because every implementation ignores unknown keys and attributes rather than rejecting them, the
-  two bullets above degrade **silently**. Feeding a `[Callout]` source to Python or .NET produces a
-  diagram with the text blocks missing and no error (the node's own attributes still apply — a
-  `[Callout]` line starts with `[`, so it passes through the annotation buffer untouched). Feeding an
-  `xy` to `cparse.py` produces a normally-stacked diagram and no warning. And no golden case can catch
-  either: `expected.ir.json` deliberately records no coordinates (see *Golden cases*), so L1 is
-  identical whichever implementation ran. A diagram that quietly loses its geometry is worse than one
-  that refuses to build.
-- **Geometry is written back to source by TypeScript only.** `sync` (and the layout half of
-  `--layout-from`) records `xy`/`size` on entities whose diagram geometry differs from what `build`
-  would have written; Python and .NET write nothing, so a rearrange-and-sync round trip through them
-  is silently one-way and the next `build` discards the layout. The shared goldens are unaffected in
-  both directions: with nobody having dragged anything there is no difference to write, so the
-  emitted source is byte-identical to the old behaviour — which is precisely why this had to be
-  written down rather than left to a failing test.
+  `label`. The lane width (`17`), the font (`12`), the 2px clash tolerance and the alternating
+  `+1/−1/+2…` shift are shared constants. The SVG preview deliberately keeps labels inline — a
+  separate, still-standing divergence (see the SVG section above).
+- **Geometry — `xy`, node `size`, `style`.** Read by every front end, in a `.c` *and* in a `.cs`, on
+  signals *and* on functions. Malformed values follow JavaScript `Number()` rather than raising:
+  Python routes through `_js_number`, .NET through `JsNumber`, so `"1_0"`, `"infinity"` and
+  `"0x10"` agree across languages (they are the three cases where `float()` and `Number()` differ).
+  A missing key or empty string leaves the default untouched (signal `160x60`, function `180x72`).
+- **`[Callout]`.** Parsed by every C# front end. Callouts are a **list**, not a dictionary, so several
+  may hang off one declaration; coordinates are absolute canvas coordinates; `band` is emitted before
+  the containers while `box`/`text` are emitted after the nodes. An unrecognised shape falls back to
+  `text`. The parse-dispatch merge concatenates the lists from the C and C# front ends.
+- **Geometry write-back.** `sync` (and the layout half of `--layout-from`) records `xy`/`size` on
+  entities whose diagram geometry differs from what `build` would have written. All three
+  implementations write the pair back, and all three merge at **parameter level** — a hand-written
+  `Style`, a compact `Unit="LSB"`, or a `[Device]` line above the `[Drawcode]` attribute survives
+  untouched. `style` itself is never written: it is input-only, like `clientX` on an element.
+- **Build switches.** `--inline`, `--cards`, `--no-rw-labels` and `--straight-edges` are accepted by
+  all three CLIs with the same semantics. Absent flags produce byte-identical output to the old
+  behaviour, which is what keeps the goldens meaningful.
+
+**Unknown keys still degrade silently.** Every implementation ignores annotation keys and attributes
+it does not recognise rather than rejecting them. That is deliberate forward compatibility, but it
+also means a *future* extension would again be ignored by whichever implementation lacked it. The
+five behaviours above are no longer in that class; when adding a sixth, port it to all three and give
+each side a test, because no golden case will catch the omission.
+
 - **`Path = "a/b"` is aligned.** All three front ends map `Path` to the container path (TypeScript
   and .NET once omitted it from their key whitelists while Python stored every named argument; the
   whitelists now list it, and each side has a regression test). Nothing to work around.

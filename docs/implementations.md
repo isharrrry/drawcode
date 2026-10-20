@@ -22,7 +22,7 @@ in [benchmark.md](benchmark.md) compares implementations rather than ecosystems.
 | Runtime dependencies | **none** (stdlib only) | **none** (no `node_modules`) | **none** (BCL only) |
 | Entry point | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | Tests | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| Test count | 75 | 107 | 79 |
+| Test count | 144 | 175 | 119 |
 | Per-implementation guide | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 Every command in the table runs from the repository root. Each implementation directory also has a
@@ -33,7 +33,8 @@ Every command in the table runs from the repository root. Each implementation di
 All three offer the same two operations:
 
 ```
-build <files...> [--root DIR] [--out FILE] [--layout-from FILE] [--svg FILE]
+build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 sync  <drawio> <files...> [--root DIR] [--write]
 ```
 
@@ -41,6 +42,14 @@ sync  <drawio> <files...> [--root DIR] [--write]
 | :--- | :--- |
 | `build` | parse sources → IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout; `--svg` also emits a preview. |
 | `sync` | read `.drawio` → apply layout and annotation attributes → write back the **declaration layer** only. Dry run unless `--write` is given. |
+
+The four content/layout switches are accepted by all three CLIs with identical semantics:
+`--inline` folds a signal written once and read once into a direct device-to-device edge,
+`--cards` renders functions with an `asset` as image cards, `--no-rw-labels` drops the
+`read`/`write` edge labels, and `--straight-edges` replaces orthogonal routing with straight
+lines (hand-made waypoints and exit/entry anchors survive; automatic elbows do not). Absent flags
+produce byte-identical output to the pre-switch behaviour, which is what keeps the shared goldens
+meaningful.
 
 ## Python
 

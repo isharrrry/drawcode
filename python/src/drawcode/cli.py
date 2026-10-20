@@ -16,6 +16,7 @@ from .adopt import adopt_foreign
 from .codegen import sync_source
 from .drawio import apply_layout, read_layout, to_drawio
 from .dump import dump_ir_json
+from .model import collapse_signals
 from .parse import parse_any
 from .svg import to_svg
 
@@ -98,6 +99,25 @@ def main(argv=None):
     b.add_argument("--merge", action="store_true", help="write all modules into one .drawio instead of one diagram per module")
     b.add_argument("--layout-from", default=None, help="reuse the hand-made layout in an existing .drawio")
     b.add_argument("--svg", default=None, help="also export a read-only SVG (same coordinates as the .drawio)")
+    # 下面四个开关与 TS / .NET 版同名同义；不带时产物与旧版逐字节相同（金标准依赖这一点）。
+    b.add_argument(
+        "--inline", action="store_true",
+        help="fold a signal with exactly one writer and one reader into a direct edge",
+    )
+    b.add_argument(
+        "--cards", action="store_true",
+        help='draw funcs carrying asset="..." as image cards instead of boxes',
+    )
+    # argparse 的布尔开关只能表达「出现即为真」，而这里的默认值恰好是 True，
+    # 所以用 store_false + dest：不带开关时 rw_labels 保持 True。
+    b.add_argument(
+        "--no-rw-labels", dest="rw_labels", action="store_false",
+        help="drop the read/write labels on edges",
+    )
+    b.add_argument(
+        "--straight-edges", action="store_true",
+        help="draw edges as direct lines; keep hand-made bends and side anchors",
+    )
 
     s = sub.add_parser("sync", help=".drawio -> source code (declaration layer only)")
     s.add_argument("drawio")
@@ -147,6 +167,14 @@ def main(argv=None):
             )
         for plan in plans:
             model = parse_any(plan["files"], root=root)
+
+            # 折叠「一写一读」的信号：设备之间直连，中间的信号节点不画。
+            # 放在布局之前是刻意的 —— 这是**图的内容**变了，不是排版变了，
+            # 少掉的节点必须由重新布局补位，而不是在原位留一个洞。
+            folded = 0
+            if a.inline:
+                folded = collapse_signals(model)
+
             if a.layout_from:
                 # 这里的两个守卫都是「宁可报错也不静默」：
                 # 用户显式传了 --layout-from 就是想复用排版，拿到空布局却继续跑的话，
@@ -163,7 +191,9 @@ def main(argv=None):
                         % a.layout_from
                     )
                 apply_layout(model, layout)
-            xml = to_drawio(model)
+            xml = to_drawio(
+                model, cards=a.cards, rw_labels=a.rw_labels, straight_edges=a.straight_edges
+            )
             out = plan["out"]
             os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
             # newline="" 很关键：不让 Python 把 \n 翻译成 \r\n，否则产物哈希随平台变化
@@ -174,11 +204,17 @@ def main(argv=None):
                 svg_out = os.path.abspath(a.svg)
                 os.makedirs(os.path.dirname(svg_out) or ".", exist_ok=True)
                 with open(svg_out, "w", encoding="utf-8", newline="") as fh:
-                    fh.write(to_svg(model))
+                    fh.write(to_svg(
+                        model, cards=a.cards, rw_labels=a.rw_labels,
+                        straight_edges=a.straight_edges,
+                    ))
                 svg_note = " + " + svg_out
+            # signals= 报的是**折叠前**的信号数：它和调用方看到的源码一一对应，
+            # 折了多少另用 folded= 报，否则这个数会随排版选项变化，没法当校验依据。
+            inline_note = (" folded=%d" % folded) if a.inline else ""
             print(
-                "signals=%d funcs=%d edges=%d -> %s%s"
-                % (len(model.signals), len(model.funcs), len(model.edges), out, svg_note)
+                "signals=%d funcs=%d edges=%d -> %s%s%s"
+                % (len(model.signals), len(model.funcs), len(model.edges), out, svg_note, inline_note)
             )
         return 0
 

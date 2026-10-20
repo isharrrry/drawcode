@@ -110,6 +110,68 @@ def _read_annotations(buf):
     return meta, dev
 
 
+def _js_number(text):
+    """模拟 JavaScript 的 ``Number()`` —— 几何键的容差契约以它为准。
+
+    为什么不能直接用 ``float()``：两个实现（TypeScript / .NET）与 Python 在这
+    三个病态输入上会得出不同结果，而坐标一旦分叉，同一份源码在三种语言里就会
+    排出三种图：
+
+      * ``float("1_0")`` == 10.0，但 ``Number("1_0")`` 是 NaN（JS 不认数字分隔符）；
+      * ``float("infinity")`` 可用，``Number("infinity")`` 是 NaN（只认大小写精确的
+        ``Infinity``）；
+      * ``float("0x10")`` 抛 ValueError，``Number("0x10")`` 是 16。
+
+    畸形与缺失一律得到 NaN，**不抛异常**：TS 的 ``applyGeometry`` 从不校验，下游
+    自己承担。这里若抛异常，一份写错坐标的源码会让 Python 版直接崩掉，而另外两个
+    版本照常出图 —— 那才是最难查的跨语言差异。
+    """
+    t = text.strip()
+    if t == "":
+        return 0.0  # Number("") === 0，与 Number(" ") 相同
+    try:
+        if re.fullmatch(r"0[xX][0-9a-fA-F]+", t):
+            return float(int(t, 16))
+        if re.fullmatch(r"0[oO][0-7]+", t):
+            return float(int(t[2:], 8))
+        if re.fullmatch(r"0[bB][01]+", t):
+            return float(int(t[2:], 2))
+        # JS 的十进制字面量：允许 `1.` / `.5` / 指数；Infinity 区分大小写且可带符号。
+        if re.fullmatch(r"[+-]?(?:Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)", t):
+            return float(t)
+    except (ValueError, OverflowError):
+        pass
+    return float("nan")
+
+
+def _split_numbers(value, sep):
+    """按分隔符切分并逐段转数字；**缺段补 NaN**，与 TS 的 ``parts[1]`` 一致。
+
+    例如 ``"40"`` 的 xy 在 TS 里得到 ``x=40, y=undefined`` —— 后续算术变 NaN。
+    这里返回 ``[40.0, nan]``，下游行为相同。
+    """
+    return [_js_number(part) for part in value.split(sep)]
+
+
+def _apply_geometry(ent, meta):
+    """把 ``xy`` / ``size`` 套到实体上。**两个前端、两类实体共用这一个入口。**
+
+    容差与 ``applyGeometry``（TS）逐字对齐：缺键或空串不动默认值；分隔符写错不
+    报错，只得到 NaN。``xy`` 用逗号、``size`` 用小写 ``x`` —— 写混会静默得到
+    NaN 尺寸，这是契约的一部分（回写侧 codegen 按同样的切法生成字符串）。
+    """
+    xy = meta.get("xy")
+    if xy is not None and xy != "":
+        parts = _split_numbers(xy, ",")
+        ent.x = parts[0] if len(parts) > 0 else float("nan")
+        ent.y = parts[1] if len(parts) > 1 else float("nan")
+    size = meta.get("size")
+    if size is not None and size != "":
+        parts = _split_numbers(size.lower(), "x")
+        ent.w = parts[0] if len(parts) > 0 else float("nan")
+        ent.h = parts[1] if len(parts) > 1 else float("nan")
+
+
 def _parse_params(text):
     """解析形参表。形参随后会被当作函数节点的「端口」参与方向排序。"""
     text = text.strip()
@@ -268,22 +330,24 @@ def parse_project(paths, root=None):
     for rel, lineno, direction, ctype, name, meta in raw_signals:
         sid = "%s::%s" % (rel, name)
         cpath = _container_path(meta, rel)
-        model.add_signal(
-            Signal(
-                id=sid,
-                name=name,
-                ctype=ctype,
-                dir=direction,
-                file=rel,
-                line=lineno,
-                unit=meta.get("unit", ""),
-                alias=meta.get("alias", ""),
-                note=meta.get("note", ""),
-                external=meta.get("external", "") == "true",
-                group=_top_group(cpath),
-                path=cpath,
-            )
+        sig = Signal(
+            id=sid,
+            name=name,
+            ctype=ctype,
+            dir=direction,
+            file=rel,
+            line=lineno,
+            unit=meta.get("unit", ""),
+            alias=meta.get("alias", ""),
+            note=meta.get("note", ""),
+            external=meta.get("external", "") == "true",
+            group=_top_group(cpath),
+            path=cpath,
+            style=meta.get("style", ""),
         )
+        # 与 TS 一致：信号的 xy/size 也读（旧版只对函数读，信号上的坐标被静默丢弃）
+        _apply_geometry(sig, meta)
+        model.add_signal(sig)
 
     signals_by_name = {s.name: s.id for s in model.signals.values()}
 
@@ -308,20 +372,13 @@ def parse_project(paths, root=None):
                 external=meta.get("external", "") == "true",
                 group=_top_group(fpath),
                 path=fpath,
+                style=meta.get("style", ""),
             )
         )
         # 下面两个 size 是**同名但无关的两个键**，别合并：
-        #   meta["size"] —— 节点几何尺寸 "180x72"，只有 C 侧支持（C# 前端不读）
-        #   dev["size"]  —— @device 的器件物理封装尺寸 "2.0x3.0mm"，两侧都支持
-        xy = meta.get("xy")
-        if xy:
-            # 显式坐标，覆盖默认堆叠。同样只有 C 侧支持。
-            parts = [float(v) for v in xy.split(",")]
-            model.funcs[fid].x, model.funcs[fid].y = parts[0], parts[1]
-        size = meta.get("size")
-        if size:
-            parts = [float(v) for v in size.lower().split("x")]
-            model.funcs[fid].w, model.funcs[fid].h = parts[0], parts[1]
+        #   meta["size"] —— 节点几何尺寸 "180x72"（与信号共用 _apply_geometry）
+        #   dev["size"]  —— @device 的器件物理封装尺寸 "2.0x3.0mm"
+        _apply_geometry(model.funcs[fid], meta)
         dev = info.get("device") or {}
         if dev:
             model.devices[fid] = Device(

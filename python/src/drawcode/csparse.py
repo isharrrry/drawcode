@@ -13,20 +13,28 @@
 注释，就是为了让编辑器能补全 ``Direction.`` 和属性名——这是选这个语法的唯一理由。
 attribute 的类型定义见 ``examples/*/cs/DrawcodeAttributes.cs``（解析器不需要它，只看用法）。
 
-**与 C 前端的两处有意不对称**（改之前先想清楚，这是设计不是遗漏）：
-  1. C 侧「有 ``@drawcode`` 注解就算信号」；C# 侧必须**有方向**才算信号，
-     没写 ``Direction`` 的 ``[Drawcode]`` 只当作文档，节点类型落到函数上。
-  2. 节点几何键 ``xy`` 与节点 ``size`` **只有 C 侧读**。这里的 ``[Drawcode]`` 没有
-     ``Size`` 属性，本文件也从不调用 ``meta.get("size")``——所以 C# 方法永远由默认
-     堆叠算法定位定尺。（注意别把它和 ``[Device]`` 上的 ``Size`` 搞混，那是器件的
-     物理封装尺寸，两侧都读，两个键同名但毫无关系。）
+**与 C 前端的一处有意不对称**（改之前先想清楚，这是设计不是遗漏）：
+  C 侧「有 ``@drawcode`` 注解就算信号」；C# 侧必须**有方向**才算信号，
+  没写 ``Direction`` 的 ``[Drawcode]`` 只当作文档，节点类型落到函数上。
+
+**几何与样式**：``Xy``（``"x,y"``）、``Size``（``"宽x高"``）、``Style``（原样追加
+到节点样式串末尾）在 C 与 C# 两个前端、信号与函数两类实体上都读 —— 与 TS 实现
+一致。容差见 ``cparse._apply_geometry``：缺键不动默认值、畸形得 NaN、不报错。
+别把这里的 ``Size`` 和 ``[Device]`` 上的 ``Size`` 搞混：后者是器件物理封装尺寸，
+同名但毫无关系，各在自己的命名空间里。
+
+``[Callout("文本", Xy="…", Size="…", Style="text|box|band", Font=12)]`` 是**独立的
+注释层**：一个声明可以挂多块说明文字，它们不参与连线、不进容器包围盒。
 """
 
 import os
 import re
 
-from .cparse import _container_path, _def_use, _parse_params, _rel, _stem, _top_group
-from .model import Device, Func, Model, Signal
+from .cparse import (
+    _apply_geometry, _container_path, _def_use, _js_number, _parse_params, _rel,
+    _split_numbers, _stem, _top_group,
+)
+from .model import Callout, Device, Func, Model, Signal
 
 # Direction values come from the `Direction` enum that ships with the toolchain
 # (`DrawcodeAttributes.cs`). Accept both spellings of the bidirectional case.
@@ -35,11 +43,29 @@ DIRS = {"In": "in", "Out": "out", "Io": "inout", "InOut": "inout", "None": ""}
 
 # `[Drawcode(Direction.In, Unit = "LSB", Alias = "…")]` — direction is positional and
 # optional, everything else is a named property.
-# （方向是位置参数且可省略，其余是命名属性。用 re.S 以容忍跨行的 attribute。）
-DRAWCODE_ATTR_RE = re.compile(r"\[\s*Drawcode\s*\((.*?)\)\s*\]", re.S)
-DEVICE_ATTR_RE = re.compile(r"\[\s*Device\s*\((.*?)\)\s*\]", re.S)
+#
+# 三种特性共用一个正则，与 TS 的 ATTR_RE 同形：贪婪的 `(.*)`、不跨行。
+# 跨行属性（`re.S`）在旧版里被容忍，但 TS/.NET 都按行解析；三版对同一输入的
+# 判定必须一致，所以这里也回到逐行语义。
+ATTR_RE = re.compile(r"\[\s*(Drawcode|Device|Callout)\s*\((.*)\)\s*\]")
 DIR_ARG_RE = re.compile(r"Direction\.(\w+)")
-NAMED_ARG_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+# 命名参数：带引号值与裸词都认（`Style = "box"` 与 `External = true` 两种写法）。
+# 旧版只认带引号的值，导致 `Style=box` 被静默丢弃、文字块退回默认种类。
+ARG_RE = re.compile(r'(\w+)\s*=\s*(?:"([^"]*)"|(\w+))')
+
+# `[Drawcode]` 认的键。与 C 侧的「全收」不同：C# 是真 attribute，键名由
+# DrawcodeAttributes.cs 定义，未知键本来就不该出现。Xy/Size/Style 与 C 侧同名。
+META_KEY = {
+    "unit", "alias", "note", "tooltip", "external", "asset", "path",
+    "xy", "size", "style",
+}
+
+# `[Callout]` 的键**刻意与 META_KEY 分开**：`Style` 在 `[Drawcode]` 上是
+# 「追加到节点样式」，在 `[Callout]` 上是「文字块种类」，同名不同义。
+CALLOUT_KEY = {"xy", "size", "style", "font"}
+CALLOUT_SHAPES = {"text", "box", "band"}
+# 文本必须是第一个位置参数、用双引号括起（内部不能有双引号）。
+CALLOUT_TEXT_RE = re.compile(r'^"([^"]*)"\s*(?:,\s*(.*))?$', re.S)
 
 # 字段/方法声明前面可能出现的一堆修饰符，全部吃掉再取类型与名字。
 MODIFIERS = (
@@ -95,27 +121,79 @@ RECORD_DECL_RE = re.compile(
 SKIP_PREFIX = ("using ", "namespace ", "#")
 
 
-def _read_meta(buf):
-    """把一段 ``///`` 与 ``[...]`` 混合的行解析成 (drawcode 键值, device 键值)。
+def _parse_args(body):
+    """``Key = "value"`` / ``Key = bare`` → ``[(小写键, 值)]``，按出现顺序。
 
-    属性名统一转小写，好和 C 侧的 IR 键（unit/alias/note/…）对齐。
+    带引号时可含空格与逗号（``Xy = "40,40"`` 不会再被切开，因为这里不切逗号，
+    只逐段找键值对）；裸词只收 ``\\w+``，与 TS 的 ``ARG_RE`` 逐字一致。
     """
-    meta, dev = {}, {}
-    for raw in buf:
-        m = DRAWCODE_ATTR_RE.search(raw)
-        if m:
-            args = m.group(1)
-            d = DIR_ARG_RE.search(args)
-            if d:
-                meta["dir"] = DIRS.get(d.group(1), "")
-            for key, val in NAMED_ARG_RE.findall(args):
-                meta[key.lower()] = val
+    out = []
+    for m in ARG_RE.finditer(body):
+        quoted, bare = m.group(2), m.group(3)
+        out.append((m.group(1).lower(), quoted if quoted is not None else (bare or "")))
+    return out
+
+
+def _parse_callout(body):
+    """``[Callout("文本", ...)]`` → 原始形态（还没挂到宿主实体上）。
+
+    默认值与 TS 的 parseCallout 逐字相同：``240x40`` 的文字块、无边框、字号 0
+    （= 用种类默认值）。认不出的 ``Style`` 退回 ``text``，而不是把原始串当样式用
+    —— 后者会静默产出非法样式。``Font`` 走 ``Number(v) || 0``：畸形与 0 都归 0。
+    """
+    out = {"text": "", "shape": "text", "font_size": 0.0, "x": 0.0, "y": 0.0, "w": 240.0, "h": 40.0}
+    tm = CALLOUT_TEXT_RE.match(body.strip())
+    rest = body if tm is None else (tm.group(2) or "")
+    if tm is not None:
+        out["text"] = tm.group(1)
+    for key, val in _parse_args(rest):
+        if key not in CALLOUT_KEY:
             continue
-        m = DEVICE_ATTR_RE.search(raw)
-        if m:
-            for key, val in NAMED_ARG_RE.findall(m.group(1)):
-                dev[key.lower()] = val
-    return meta, dev
+        if key == "style":
+            out["shape"] = val if val in CALLOUT_SHAPES else "text"
+        elif key == "font":
+            n = _js_number(val)
+            # JS 的 `Number(v) || 0`：NaN 与 0 都落 0，Infinity 保留。
+            out["font_size"] = 0.0 if n != n else n
+        else:
+            parts = _split_numbers(val, ",") if key == "xy" else _split_numbers(val.lower(), "x")
+            if key == "xy":
+                out["x"] = parts[0] if len(parts) > 0 else float("nan")
+                out["y"] = parts[1] if len(parts) > 1 else float("nan")
+            else:
+                out["w"] = parts[0] if len(parts) > 0 else float("nan")
+                out["h"] = parts[1] if len(parts) > 1 else float("nan")
+    return out
+
+
+def _read_meta(buf):
+    """一段相邻特性行 → ``(drawcode 键值, device 键值, [Callout…])``。
+
+    属性名统一转小写，好和 C 侧的 IR 键（unit/alias/note/…）对齐。方向仍放在
+    ``meta["dir"]``（C 侧同一套 IR 键）；Callout 用**列表**而不是塞进 meta：一个
+    声明挂两块文字是正常需求，塞进 dict 会被后一条静默覆盖。
+    """
+    meta, dev, callouts = {}, {}, []
+    for raw in buf:
+        m = ATTR_RE.search(raw)
+        if not m:
+            continue
+        kind = m.group(1)
+        args = m.group(2)
+        if kind == "Callout":
+            callouts.append(_parse_callout(args))
+            continue
+        if kind == "Device":
+            for key, val in _parse_args(args):
+                dev[key] = val
+            continue
+        d = DIR_ARG_RE.search(args)
+        if d:
+            meta["dir"] = DIRS.get(d.group(1), "")
+        for key, val in _parse_args(args):
+            if key in META_KEY:
+                meta[key] = val
+    return meta, dev, callouts
 
 
 def _cs_bodies(lines):
@@ -209,14 +287,16 @@ def parse_cs_project(paths, root=None):
                 index = j + 1
                 continue
 
-            meta, dev = _read_meta(buf)
+            meta, dev, callouts = _read_meta(buf)
             buf = []
 
             mf = FIELD_RE.match(s)
             # 与 C 侧不同：这里要求**有方向**才算信号。只写 [Drawcode(Alias="…")]
             # 的纯文档性标注不会产出信号节点。
             if mf and meta.get("dir"):
-                raw_signals.append((rel, lineno, meta["dir"], mf.group("ctype"), mf.group("name"), meta))
+                raw_signals.append((
+                    rel, lineno, meta["dir"], mf.group("ctype"), mf.group("name"), meta, callouts,
+                ))
                 index += 1
                 continue
 
@@ -230,28 +310,51 @@ def parse_cs_project(paths, root=None):
                     "params": _parse_params(mfn.group("params")),
                     "meta": meta,
                     "device": dev,
+                    "callouts": callouts,
                 }
 
             index += 1
 
-    for rel, lineno, direction, ctype, name, meta in raw_signals:
+    def _attach_callouts(owner, raws):
+        """把一条声明上的文字块挂进模型。
+
+        坐标是**画布绝对坐标** —— 文字块不属于任何容器（见 model.Callout），
+        所以这里不做任何容器偏移。id 形如 ``owner#callout1``，从 1 开始。
+        """
+        for i, raw in enumerate(raws):
+            model.add_callout(Callout(
+                id="%s#callout%d" % (owner, i + 1),
+                text=raw["text"],
+                owner=owner,
+                shape=raw["shape"],
+                font_size=raw["font_size"],
+                x=raw["x"],
+                y=raw["y"],
+                w=raw["w"],
+                h=raw["h"],
+            ))
+
+    for rel, lineno, direction, ctype, name, meta, callouts in raw_signals:
+        sid = "%s::%s" % (rel, name)
         cpath = _container_path(meta, rel)
-        model.add_signal(
-            Signal(
-                id="%s::%s" % (rel, name),
-                name=name,
-                ctype=ctype,
-                dir=direction,
-                file=rel,
-                line=lineno,
-                unit=meta.get("unit", ""),
-                alias=meta.get("alias", ""),
-                note=meta.get("note", ""),
-                external=meta.get("external", "") == "true",
-                group=_top_group(cpath),
-                path=cpath,
-            )
+        signal = Signal(
+            id=sid,
+            name=name,
+            ctype=ctype,
+            dir=direction,
+            file=rel,
+            line=lineno,
+            unit=meta.get("unit", ""),
+            alias=meta.get("alias", ""),
+            note=meta.get("note", ""),
+            external=meta.get("external", "") == "true",
+            group=_top_group(cpath),
+            path=cpath,
+            style=meta.get("style", ""),
         )
+        _apply_geometry(signal, meta)
+        model.add_signal(signal)
+        _attach_callouts(sid, callouts)
 
     signals_by_name = {s.name: s.id for s in model.signals.values()}
     funcs_by_name = {}
@@ -275,10 +378,13 @@ def parse_cs_project(paths, root=None):
                 external=meta.get("external", "") == "true",
                 group=_top_group(fpath),
                 path=fpath,
+                style=meta.get("style", ""),
             )
         )
-        # 注意这里只读 dev 的 size（器件封装），不读 meta 的 size（节点几何）——
-        # 见模块头第 2 条不对称说明。
+        # 节点几何：Xy / Size（与信号共用 _apply_geometry）。
+        # 下面的 dev["size"] 是器件封装尺寸，同名但无关，别合并。
+        _apply_geometry(model.funcs[fid], meta)
+        _attach_callouts(fid, info["callouts"])
         dev = info["device"]
         if dev:
             model.devices[fid] = Device(

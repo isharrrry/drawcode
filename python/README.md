@@ -14,6 +14,10 @@ python -m drawcode.cli sync ../out/flow.drawio ../examples/small/c/*.h ../exampl
     --root ../examples/small/c --write
 ```
 
+`build` also accepts `--merge`, `--inline`, `--cards`, `--no-rw-labels` and `--straight-edges`.
+All three implementations share the same option names and semantics; see
+`../docs/implementations.md` for what each one does.
+
 Or install it as a package (gives you a `drawcode` command):
 
 ```bash
@@ -24,7 +28,7 @@ drawcode build ...
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -t .     # 124 tests
+python -m unittest discover -s tests -t .     # 144 tests
 ```
 
 ## Layout

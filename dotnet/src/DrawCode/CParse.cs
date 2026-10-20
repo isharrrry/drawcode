@@ -68,6 +68,119 @@ internal static partial class CParse
     // 形参名同样要 Unicode：中文形参在 C# 侧完全合法，名字若只认 ASCII，
     // 整个形参会从端口表里消失（TS 的 PARAM_RE 早已是 Unicode）。
     private static readonly Regex ParamRe = new(@"^(?<ctype>.+?)\s*(?<name>[\p{L}_][\p{L}\p{N}_]*)$", RegexOptions.Compiled);
+    private static readonly Regex HexNumberRe = new(@"^0[xX][0-9a-fA-F]+$", RegexOptions.Compiled);
+    private static readonly Regex OctalNumberRe = new(@"^0[oO][0-7]+$", RegexOptions.Compiled);
+    private static readonly Regex BinaryNumberRe = new(@"^0[bB][01]+$", RegexOptions.Compiled);
+    // JS 的十进制字面量：允许 `1.` / `.5` / 指数；Infinity 区分大小写且可带符号。
+    private static readonly Regex DecimalNumberRe = new(
+        @"^[+-]?(?:Infinity|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 模拟 JavaScript 的 <c>Number()</c> —— 几何键的容差契约以它为准。
+    ///
+    /// 为什么不能直接用 <c>double.Parse</c>：三个实现在这几个病态输入上会得出不同
+    /// 结果，而坐标一旦分叉，同一份源码在三种语言里就会排出三种图：
+    ///
+    ///   * <c>Number("1_0")</c> 是 NaN（JS 不认数字分隔符），而 .NET/Python 的
+    ///     数字解析会忽略下划线或抛异常；
+    ///   * <c>Number("infinity")</c> 是 NaN（只认大小写精确的 <c>Infinity</c>）；
+    ///   * <c>Number("0x10")</c> 是 16，而 <c>double.Parse</c> 会抛异常。
+    ///
+    /// 畸形与缺失一律得到 NaN，**不抛异常**：TS 的 <c>applyGeometry</c> 从不校验，
+    /// 下游自己承担。这里若抛异常，一份写错坐标的源码会让 .NET 版直接崩掉，而另外
+    /// 两个版本照常出图 —— 那才是最难查的跨语言差异。
+    /// </summary>
+    internal static double JsNumber(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0)
+        {
+            return 0.0; // Number("") === 0，与 Number(" ") 相同
+        }
+
+        if (HexNumberRe.IsMatch(t))
+        {
+            return RadixToDouble(t[2..], 16);
+        }
+
+        if (OctalNumberRe.IsMatch(t))
+        {
+            return RadixToDouble(t[2..], 8);
+        }
+
+        if (BinaryNumberRe.IsMatch(t))
+        {
+            return RadixToDouble(t[2..], 2);
+        }
+
+        if (DecimalNumberRe.IsMatch(t))
+        {
+            // .NET Core 3.0+ 与 Python 的 float() 一样把超范围小数转成 ±Infinity，
+            // 不抛异常 —— 与 Python 侧逐字一致。
+            return double.Parse(t, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return double.NaN;
+    }
+
+    /// <summary>任意进制整数串转 double。超范围折回 NaN，与 Python 的
+    /// <c>float(int(...))</c> 抛 OverflowError 后被吞掉的结果一致。</summary>
+    private static double RadixToDouble(string digits, int radix)
+    {
+        var value = System.Numerics.BigInteger.Zero;
+        foreach (var ch in digits)
+        {
+            var d = ch switch
+            {
+                >= '0' and <= '9' => ch - '0',
+                >= 'a' and <= 'f' => ch - 'a' + 10,
+                _ => ch - 'A' + 10,
+            };
+            value = value * radix + d;
+        }
+
+        try
+        {
+            var result = (double)value;
+            return double.IsInfinity(result) ? double.NaN : result;
+        }
+        catch (OverflowException)
+        {
+            return double.NaN;
+        }
+    }
+
+    /// <summary>
+    /// 按分隔符切分并逐段转数字；**缺段补 NaN**，与 TS 的 <c>parts[1]</c> 一致。
+    /// 例如 <c>"40"</c> 的 xy 在 TS 里得到 <c>x=40, y=undefined</c> —— 后续算术变 NaN。
+    /// </summary>
+    internal static double[] SplitNumbers(string value, char sep) =>
+        value.Split(sep).Select(JsNumber).ToArray();
+
+    /// <summary>
+    /// 把 <c>xy</c> / <c>size</c> 套到实体上。**两个前端、两类实体共用这一个入口。**
+    ///
+    /// 容差与 TS 的 <c>applyGeometry</c> 逐字对齐：缺键或空串不动默认值；分隔符写错
+    /// 不报错，只得到 NaN。<c>xy</c> 用逗号、<c>size</c> 用小写 <c>x</c> —— 写混会
+    /// 静默得到 NaN 尺寸，这是契约的一部分（回写侧 codegen 按同样的切法生成字符串）。
+    /// </summary>
+    internal static void ApplyGeometry(INode ent, IReadOnlyDictionary<string, string> meta)
+    {
+        if (meta.TryGetValue("xy", out var xy) && xy.Length > 0)
+        {
+            var parts = SplitNumbers(xy, ',');
+            ent.X = parts.Length > 0 ? parts[0] : double.NaN;
+            ent.Y = parts.Length > 1 ? parts[1] : double.NaN;
+        }
+
+        if (meta.TryGetValue("size", out var size) && size.Length > 0)
+        {
+            var parts = SplitNumbers(size.ToLowerInvariant(), 'x');
+            ent.W = parts.Length > 0 ? parts[0] : double.NaN;
+            ent.H = parts.Length > 1 ? parts[1] : double.NaN;
+        }
+    }
 
     /// <summary>相对项目根的路径，一律用正斜杠。</summary>
     internal static string Rel(string path, string root) =>
@@ -389,7 +502,7 @@ internal static partial class CParse
         foreach (var (rel, lineno, direction, ctype, name, meta) in rawSignals)
         {
             var cpath = ContainerPath(meta, rel);
-            model.AddSignal(new Signal
+            var sig = new Signal
             {
                 Id = rel + "::" + name,
                 Name = name,
@@ -403,7 +516,11 @@ internal static partial class CParse
                 External = meta.GetValueOrDefault("external", "") == "true",
                 Group = TopGroup(cpath),
                 Path = cpath,
-            });
+                Style = meta.GetValueOrDefault("style", ""),
+            };
+            // 与 TS 一致：信号的 xy/size 也读（旧版只对函数读，信号上的坐标被静默丢弃）
+            ApplyGeometry(sig, meta);
+            model.AddSignal(sig);
         }
 
         var signalsByName = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -434,23 +551,13 @@ internal static partial class CParse
                 External = meta.GetValueOrDefault("external", "") == "true",
                 Group = TopGroup(fpath),
                 Path = fpath,
+                Style = meta.GetValueOrDefault("style", ""),
             });
 
-            var xy = meta.GetValueOrDefault("xy");
-            if (xy is not null)
-            {
-                var parts = xy.Split(',').Select(v => double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                model.Funcs[fid].X = parts[0];
-                model.Funcs[fid].Y = parts[1];
-            }
-
-            var size = meta.GetValueOrDefault("size");
-            if (size is not null)
-            {
-                var parts = size.ToLowerInvariant().Split('x').Select(v => double.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-                model.Funcs[fid].W = parts[0];
-                model.Funcs[fid].H = parts[1];
-            }
+            // 下面两个 size 是**同名但无关的两个键**，别合并：
+            //   meta["size"] —— 节点几何尺寸 "180x72"（与信号共用 ApplyGeometry）
+            //   dev["size"]  —— @device 的器件物理封装尺寸 "2.0x3.0mm"
+            ApplyGeometry(model.Funcs[fid], meta);
 
             var dev = info.Device;
             if (dev.Count > 0)

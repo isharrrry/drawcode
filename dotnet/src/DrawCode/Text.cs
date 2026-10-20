@@ -110,7 +110,26 @@ internal static class Text
     /// </summary>
     internal static string Num(double v)
     {
-        if (double.IsFinite(v) && v == Math.Floor(v) && v >= long.MinValue && v <= long.MaxValue)
+        // NaN / ±Infinity 显式处理：几何键是**不校验**的（见 CParse.JsNumber），
+        // 畸形坐标会一路流到这里。字面量必须与 Python `_num` / TS `reprFloat`
+        // 逐字相同 —— 小写 nan/inf、带符号 -inf；.NET 默认会写 "NaN"/"Infinity"，
+        // 三个版本的产物随即分叉。
+        if (double.IsNaN(v))
+        {
+            return "nan";
+        }
+
+        if (double.IsPositiveInfinity(v))
+        {
+            return "inf";
+        }
+
+        if (double.IsNegativeInfinity(v))
+        {
+            return "-inf";
+        }
+
+        if (v == Math.Floor(v) && v >= long.MinValue && v <= long.MaxValue)
         {
             return ((long)v).ToString(CultureInfo.InvariantCulture);
         }

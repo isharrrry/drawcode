@@ -22,7 +22,7 @@ rendimiento de [benchmark.md](benchmark.es.md) compara implementaciones y no eco
 | Dependencias en tiempo de ejecución | **ninguna** (solo biblioteca estándar) | **ninguna** (sin `node_modules`) | **ninguna** (solo BCL) |
 | Punto de entrada | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | Pruebas | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| Número de pruebas | 75 | 107 | 79 |
+| Número de pruebas | 144 | 175 | 119 |
 | Guía por implementación | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 Todos los comandos de la tabla se ejecutan desde la raíz del repositorio. Cada directorio de
@@ -33,7 +33,8 @@ implementación tiene además un `README.md` y un `SKILL.md` con el recorrido de
 Las tres ofrecen las mismas dos operaciones:
 
 ```
-build <files...> [--root DIR] [--out FILE] [--layout-from FILE] [--svg FILE]
+build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 sync  <drawio> <files...> [--root DIR] [--write]
 ```
 
@@ -41,6 +42,14 @@ sync  <drawio> <files...> [--root DIR] [--write]
 | :--- | :--- |
 | `build` | parsea fuentes → IR → escribe `.drawio`. `--layout-from` reutiliza la disposición hecha a mano de un diagrama existente; `--svg` emite además una vista previa. |
 | `sync` | lee `.drawio` → aplica disposición y atributos de anotación → escribe únicamente la **capa de declaración**. Simulación salvo que se dé `--write`. |
+
+Los cuatro interruptores de contenido/disposición se aceptan en las tres CLI con la misma semántica:
+`--inline` pliega una señal escrita una vez y leída una vez en una arista directa entre dispositivos,
+`--cards` dibuja las funciones con `asset` como tarjetas de imagen, `--no-rw-labels` elimina las
+etiquetas `read`/`write` de las aristas, y `--straight-edges` sustituye el trazado ortogonal por
+líneas rectas (los puntos de paso manuales y los anclajes de entrada/salida sobreviven; los codos
+automáticos no). Sin esos interruptores la salida es idéntica byte a byte a la anterior, que es lo que
+mantiene significativos los casos dorados compartidos.
 
 ## Python
 

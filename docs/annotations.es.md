@@ -47,7 +47,7 @@ La declaración se reconoce con una expresión regular orientada a líneas, una 
 - **Una declaración por línea, terminada en `;`.** El punto y coma final forma parte de la coincidencia; una declaración repartida en varias líneas no se reconoce.
 - **La declaración debe llevar `@drawcode`.** Un bloque de comentario sin anotación, o una anotación sobre una construcción que no es una variable de nivel superior, no produce ninguna señal.
 - **Los declaradores de array se pliegan en el tipo.** `float g_coeff[32];` produce `name = g_coeff` y `ctype = float[32]`; el sufijo se vuelve a pegar al tipo, de modo que la etiqueta dice `float[32] / in / coeff`.
-- **Las señales aceptan todas las claves de la tabla de señales de más abajo, geometría incluida.** `xy`, `size` y `style` se leen en una variable exactamente igual que en una función — pero solo las leen los frontales de TypeScript, así que consulta [Dónde surten efecto las claves de geometría](#dónde-surten-efecto-las-claves-de-geometría) antes de confiar en ellas.
+- **Las señales aceptan todas las claves de la tabla de señales de más abajo, geometría incluida.** `xy`, `size` y `style` se leen en una variable exactamente igual que en una función, en todos los frontales y en todas las implementaciones; véase [Dónde surten efecto las claves de geometría](#dónde-surten-efecto-las-claves-de-geometría).
 
 ## Dirección en C#: el atributo `[Drawcode]`
 
@@ -100,7 +100,7 @@ En C, las líneas `///` consecutivas se acumulan y se **vacían** al alcanzar un
 Los pares clave/valor en C se leen con `(\w+)\s*=\s*"([^"]*)"`: **las claves son palabras simples, los valores van entre comillas dobles y un valor no puede contener comillas dobles.** En C# las claves son propiedades con nombre del atributo. Las claves desconocidas se ignoran en silencio en lugar de provocar un error, lo que mantiene las anotaciones compatibles hacia adelante entre implementaciones.
 ## Referencia de claves: señales
 
-Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos y propiedades con `[Drawcode]` en C#. Las cinco primeras claves se comportan igual en ambos lenguajes y en todas las implementaciones; las tres últimas son geometría, y **TypeScript es la única implementación que las lee**. `dir` se documenta arriba.
+Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos y propiedades con `[Drawcode]` en C#. Todas las claves se comportan igual en ambos lenguajes y en todas las implementaciones; las tres últimas son geometría, y las lee cada frontal sobre ambos tipos de entidad. `dir` se documenta arriba.
 
 | Clave | Tipo | Valor por defecto | Efecto | Ejemplo |
 | :--- | :--- | :--- | :--- | :--- |
@@ -108,9 +108,9 @@ Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos 
 | `alias` | cadena | `""` | Nombre humano usado como **atributo personalizado** del nodo (no en la etiqueta). La etiqueta siempre muestra el identificador de C. | `alias="原始采样值"` |
 | `note` | cadena | `""` | Comentario de texto libre, escrito en los atributos personalizados del `<object>`. No se renderiza en la etiqueta. | `note="上电后需校准"` |
 | `external` | `"true"` / ausente | `false` | Marca la señal como procedente de fuera del conjunto de módulos. Se analiza como la cadena `"true"`; cualquier otro valor, incluido `"True"`, la deja en `false`. | `external="true"` |
-| `xy` | `"x,y"` | sin definir | Coordenadas absolutas del lienzo, que anulan el apilado por defecto. **Solo las lee TypeScript** (véase abajo). | `xy="420,160"` |
-| `size` | `"WxH"` | `160x60` para señales, `180x72` para funciones | Tamaño inicial del nodo; el separador es una `x` minúscula. **Solo las lee TypeScript.** | `size="180x72"` |
-| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo (coloreado por rol y similares). **Solo las lee TypeScript.** Un valor vacío deja la salida idéntica byte a byte. | `style=";fillColor=#e8f0fe"` |
+| `xy` | `"x,y"` | sin definir | Coordenadas absolutas del lienzo, que anulan el apilado por defecto. | `xy="420,160"` |
+| `size` | `"WxH"` | `160x60` para señales, `180x72` para funciones | Tamaño inicial del nodo; el separador es una `x` minúscula. | `size="180x72"` |
+| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo (coloreado por rol y similares). Un valor vacío deja la salida idéntica byte a byte. | `style=";fillColor=#e8f0fe"` |
 
 La etiqueta se ensambla con `name` en la primera línea y `ctype / dir / unit` en la segunda, omitiendo las partes vacías — así que una señal sin `unit` dice `int16_t / in`, no `int16_t / in / `.
 
@@ -127,24 +127,20 @@ Se aplica a las declaraciones de función en C y a los métodos en C#.
 | `external` | `"true"` / ausente | `false` | Cambia el estilo del nodo a la forma externa discontinua. | `external="true"` |
 | `xy` | `"x,y"` | sin definir | Posición inicial del nodo en el lienzo, en coordenadas absolutas del lienzo. Anula el apilado por defecto para este nodo. | `xy="420,160"` |
 | `size` | `"WxH"` | `180x72` | Tamaño inicial del nodo. El separador es una `x` minúscula; el valor se pasa a minúsculas antes de dividirlo, así que `180X72` también sirve. | `size="180x72"` |
-| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo. **Solo las lee TypeScript**, igual que la fila de señales. | `style=";fillColor=#dae8fc"` |
+| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo, igual que la fila de señales. | `style=";fillColor=#dae8fc"` |
 
 No mezcles los separadores: `xy` lleva una coma y `size` lleva una **`x` minúscula**. Escribir el equivocado **no** provoca ningún error — produce un nodo con tamaño `NaN`, situado en `(NaN, NaN)` y dimensionado `(NaN, NaN)`, que resulta invisible en draw.io.
 
 ### Dónde surten efecto las claves de geometría
 
-Las tres claves funcionan igual en **ambos** lenguajes y sobre **ambos** tipos de entidad — quien decide si se leen o no es la **implementación**, no el lenguaje. Esta sección antes lo contaba mal en dos direcciones, así que abajo va solo la tabla:
+Las tres claves las lee ahora **cada frontal de cada implementación**: en `.c` y en `.cs`, sobre señales y sobre funciones. Las versiones anteriores leían `xy`/`size` solo en la rama de funciones, solo en algunos frontales, y nunca leían `style`; esas lagunas están cerradas en las tres implementaciones. Las reglas son idénticas en todas partes:
 
-| | TypeScript (`cparse.ts` / `csparse.ts`) | Implementación de referencia (`cparse.py` / `csparse.py` / `CsParse.cs`) |
-| :--- | :--- | :--- |
-| `xy` / `size` sobre una **función** | se leen y se aplican | C: se leen y se aplican. **C#: no se leen en absoluto** |
-| `xy` / `size` sobre una **señal** | se leen y se aplican | **no se leen en absoluto** — `cparse.py` lee el par solo dentro de su rama de funciones |
-| `style`, cualquier entidad | se lee y se añade al estilo del nodo | **no se lee en absoluto** |
-| reescritura por `sync` | sí, solo en las entidades cuya geometría cambió el diagrama — véase [Reescritura](#reescritura) | **nada** |
+- una clave ausente o una cadena vacía deja intacto el valor por defecto de la entidad;
+- un valor malformado **no** provoca un error: se convierte en `NaN`, y un nodo con geometría `NaN` es invisible en draw.io;
+- `xy` se divide por coma y `size` por una `x` minúscula (el valor se pasa a minúsculas antes de dividirlo, así que `180X72` también se acepta);
+- la conversión sigue el `Number()` de JavaScript, no `float()` de Python ni `double.Parse` de .NET — las tres cadenas en las que difieren (`"1_0"`, `"infinity"`, `"0x10"`) están cubiertas por pruebas de paridad.
 
-La fila que muerde es la de la señal. `cparse.py` lee `xy` **después** de su bucle de señales, en la rama de funciones: un `/// @drawcode xy="420,160"` escrito sobre una variable se analiza y acto seguido se descarta, y la señal vuelve a apilarse con el algoritmo por defecto. `csparse.py` lo dice con todas las letras en su propia cabecera: su `[Drawcode]` no tiene propiedad `Size` y nunca llama a `meta.get("xy")`, así que cada método que analiza queda colocado por el algoritmo por defecto.
-
-**Todas las implementaciones ignoran las claves desconocidas en lugar de provocar un error**, así que nada de esto se anuncia solo: cambias de implementación y el diagrama cambia de forma sin ningún error, y el IR es idéntico en ambos casos — el L1 de `conformance.md` excluye a propósito `x`/`y`/`w`/`h`, así que ningún caso dorado puede detectarlo. Antes de dar por hecho que dos implementaciones coinciden sobre un fuente que lleva geometría, véase Known divergence en `conformance.md`.
+`sync` también reescribe el par en las entidades cuya geometría del diagrama difiere de lo que `build` habría escrito — véase [Reescritura](#reescritura). Como todas las implementaciones ignoran las claves desconocidas en lugar de provocar un error, estos comportamientos los fijan pruebas unitarias dedicadas y no los casos dorados: `expected.ir.json` no registra coordenadas a propósito, así que el L1 no puede detectar una regresión.
 
 No confundas estas claves con la clave `size` de `@device` / `[Device]`, que es el tamaño físico del encapsulado de una pieza y **sí** se lee en ambos lados — son claves distintas que casualmente comparten nombre.
 
@@ -200,7 +196,7 @@ Tres cosas sorprenden a la gente:
 
 1. **`band` tiene que dibujarse antes que los contenedores.** Una celda se dibuja junto con todo su subárbol, y una banda es hija directa de la raíz; emitida después de los contenedores, aterriza *encima de* ese subárbol y cubre todas las tarjetas que hay dentro. Por eso el generador emite `band` **antes** de los contenedores y `text`/`box` después de las tarjetas — no tienes que gestionarlo tú, pero sí necesitas saberlo si cambias el orden de emisión.
 2. **Arrastrar un bloque de texto no hace la ida y vuelta.** `applyLayout` solo resuelve los ids de nodos y funciones, y omite todo lo demás. Mueve el bloque en draw.io, reconstruye con `--layout-from` y **volverá de un salto al `Xy` del código fuente**. Para moverlo, edita el código fuente.
-3. **Solo el frontal de C# de TypeScript conoce este atributo.** Ni `csparse.py` ni `CsParse.cs` leen `CalloutAttribute`, y ambos ignoran los atributos desconocidos en lugar de provocar un error — así que ejecutar el mismo fuente con otra implementación elimina los bloques de texto **por completo y en silencio**.
+3. **Los tres frontales de C# conocen este atributo; el frontal de C no.** `csparse.ts`, `csparse.py` y `CsParse.cs` analizan `CalloutAttribute`, y la fusión multi-lenguaje concatena sus listas. Ninguna implementación tiene equivalente en C: un bloque de comentarios `///` no tiene un lugar natural donde llevar varios rectángulos independientes y posicionados en absoluto. Los atributos desconocidos se siguen ignorando en lugar de provocar un error, así que una propiedad mal escrita falla en silencio; el atributo en sí ya no.
 
 ## Tarjetas de imagen: `--cards`
 
@@ -280,7 +276,7 @@ Estas reglas no necesitan anotación porque se deducen de la estructura del cód
 | `style` | **nunca** — es una clave solo de entrada, como `clientX` en un elemento |
 | **cuerpo** de la función | **nunca** — esta es la restricción de diseño, no una carencia |
 
-**Solo TypeScript.** Ni `cparse.py`/`codegen.py` ni el lado .NET reescriben la geometría, así que un diagrama que reordenas hace la ida y vuelta en TypeScript, y en las otras dos es **silenciosamente de un solo sentido**.
+Las tres implementaciones reescriben el par, y las tres fusionan a **nivel de parámetro**: un `Style` escrito a mano, un `Unit="LSB"` compacto o una línea `[Device]` sobreviven intactos, y solo se reescriben las claves cuyo valor cambió de verdad. Así, `sync` hace la ida y vuelta de un diagrama reordenado con cualquiera de las tres, no solo con TypeScript.
 
 La fila de geometría es condicional, y la condición es lo que mantiene honesto a `sync`. En todo el repositorio, `applyLayout` es el único sitio que sostiene los dos números a la vez — lo que el diagrama dice ahora y lo que `build` habría escrito (el `xy` que declara el propio fuente, o el diseño por defecto si no hay ninguno) — y solo registra las entidades en las que ambos difieren. **Esas diferencias son la única geometría que `sync` escribe jamás.** Así, un proyecto que nadie ha tocado produce ficheros idénticos byte a byte; un nodo arrastrado solo gana una clave; y un nodo que el fuente ya fijaba conserva su valor original, en lugar de reescribirse al mismo número con otra grafía.
 
