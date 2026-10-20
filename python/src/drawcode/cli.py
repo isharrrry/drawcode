@@ -1,7 +1,8 @@
-"""命令行入口：``build`` 与 ``sync`` 两个子命令。
+"""命令行入口：``build``、``sync`` 与 ``dump-ir`` 三个子命令。
 
-    build  <源码...>  ->  .drawio（可选 --svg 预览、--layout-from 复用既有排版）
-    sync   <.drawio> <源码...>  ->  把图上的注解写回源码（只动声明层）
+    build    <源码...>  ->  .drawio（可选 --svg 预览、--layout-from 复用既有排版）
+    sync     <.drawio> <源码...>  ->  把图上的注解写回源码（只动声明层）
+    dump-ir  <源码...>  ->  规范化 IR JSON（L1 一致性比较用；对应 .NET 的同名子命令）
 
 两条命令互为逆过程，合起来就是「源码是唯一真相，图是派生物」这个主线的具体操作：
 build 让图跟上源码，sync 让源码跟上在图里改过的注解。
@@ -14,6 +15,7 @@ import sys
 from .adopt import adopt_foreign
 from .codegen import sync_source
 from .drawio import apply_layout, read_layout, to_drawio
+from .dump import dump_ir_json
 from .parse import parse_any
 from .svg import to_svg
 
@@ -103,12 +105,34 @@ def main(argv=None):
     s.add_argument("--root", default=None)
     s.add_argument("--write", action="store_true", help="actually write; without it this is a dry run")
 
+    d = sub.add_parser("dump-ir", help="parsed IR as canonical JSON, for L1 conformance comparison")
+    d.add_argument("files", nargs="+")
+    d.add_argument("--root", default=None)
+    d.add_argument("--out", default=None, help="output file; without it the JSON goes to stdout")
+
     a = ap.parse_args(argv)
 
     # root 只在计算相对路径时用到；缺省取第一个文件所在目录
     root = a.root
     if root is None and a.files:
         root = os.path.dirname(os.path.abspath(a.files[0]))
+
+    if a.cmd == "dump-ir":
+        model = parse_any(a.files, root=root)
+        payload = dump_ir_json(model)
+        if not a.out:
+            sys.stdout.write(payload)
+            return 0
+        out = os.path.abspath(a.out)
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        # newline=""：不让 \n 变成 \r\n，金标准比较才能逐字节一致
+        with open(out, "w", encoding="utf-8", newline="") as fh:
+            fh.write(payload)
+        print(
+            "signals=%d funcs=%d edges=%d devices=%d -> %s"
+            % (len(model.signals), len(model.funcs), len(model.edges), len(model.devices), out)
+        )
+        return 0
 
     if a.cmd == "build":
         files = _expand_modules(a.files)

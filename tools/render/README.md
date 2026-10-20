@@ -8,6 +8,9 @@ npm install
 
 node render_drawio.js  input.drawio output.svg 10    # .drawio -> SVG（mxGraph 引擎）
 node render_png.js     output.svg   output.png 2022  # SVG -> PNG（resvg）
+
+# 局部放大，用于肉眼复核大图上的小字（只改 viewBox，正文不动）
+node zoom_svg.js       input.svg    zoom.svg 120 80 640 360 3
 ```
 
 ## 为什么要这么绕

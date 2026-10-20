@@ -15,6 +15,7 @@ import { parseArgs } from "node:util";
 import { adoptForeign } from "./adopt.ts";
 import { syncSource } from "./codegen.ts";
 import { applyLayout, readLayout, toDrawio } from "./drawio.ts";
+import { dumpIrJson } from "./dump.ts";
 import {
   abspath,
   basename,
@@ -26,16 +27,38 @@ import {
   stem,
   writeTextFile,
 } from "./fsutil.ts";
+import { collapseSignals } from "./model.ts";
 import { parseAny } from "./parse.ts";
-import { toSvg } from "./svg.ts";
+import { SVG_PADDING, toSvg } from "./svg.ts";
 
 const USAGE = `usage: drawcode <build|sync> ...
 
-  build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+  build <files...> [--root DIR] [--out FILE] [--merge] [--inline] [--cards] [--no-rw-labels] [--layout-from FILE] [--svg FILE]
         source code -> .drawio (one diagram per module unless --merge)
+
+        --inline folds a signal that has exactly one writer and one reader into a direct
+        writer -> reader edge; the signal node disappears and its unit becomes the edge
+        label. Signals with several readers stay as nodes (they are real junctions).
+
+        --cards draws a func carrying asset="..." as an image card: the picture fills the
+        node box and its name sits underneath. Off by default -- asset is plain metadata
+        then, which is what the shared goldens pin down.
+
+        --no-rw-labels drops the read/write labels on edges that end at a signal node. Those
+        labels only restate the arrow direction, and on a diagram with dozens of edges they
+        bury the content. Node-to-signal edges keep their labels by default (goldens).
+
+        --straight-edges draws every edge as a direct line instead of the obstacle-avoiding
+        orthogonal route. Auto-computed bends are dropped; bends that came from
+        --layout-from are kept, because a human put them there on purpose. The exit and
+        entry anchors survive, so a line still leaves and enters the side it used to.
 
   sync <FILE.drawio> <files...> [--root DIR] [--write]
         .drawio -> source code (declaration layer only)
+
+  dump-ir <files...> [--root DIR] [--out FILE]
+        parsed IR as canonical JSON, for L1 conformance comparison
+        (write to stdout when --out is omitted; same shape as tools/dump_ir.py)
 
 Source code is the single source of truth; the diagram is a derived view.`;
 
@@ -126,6 +149,10 @@ function parse(argv: string[]): {
         root: { type: "string" },
         out: { type: "string" },
         merge: { type: "boolean" },
+        inline: { type: "boolean" },
+        cards: { type: "boolean" },
+        "no-rw-labels": { type: "boolean" },
+        "straight-edges": { type: "boolean" },
         "layout-from": { type: "string" },
         svg: { type: "string" },
       },
@@ -139,6 +166,17 @@ function parse(argv: string[]): {
       options: {
         root: { type: "string" },
         write: { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    return { cmd, values: values as Record<string, unknown>, positionals };
+  }
+  if (cmd === "dump-ir") {
+    const { values, positionals } = parseArgs({
+      args: rest,
+      options: {
+        root: { type: "string" },
+        out: { type: "string" },
       },
       allowPositionals: true,
     });
@@ -203,8 +241,21 @@ export function main(argv: string[]): number {
       return 2;
     }
 
+    const inline = values.inline === true;
+    const cards = values.cards === true;
+    // 默认 true（既有产物逐字节不变）；--no-rw-labels 时把节点—信号边上的 read/write 去掉
+    const rwLabels = values["no-rw-labels"] !== true;
+    // 默认 false（既有产物逐字节不变，金样不受影响）；--straight-edges 时边走直线
+    const straightEdges = values["straight-edges"] === true;
+
     for (const plan of plans) {
       const model = parseAny(plan.files, root);
+
+      // 折叠「一写一读」的信号：设备之间直连，中间的信号节点不画。
+      // 放在布局之前是刻意的 —— 这是**图的内容**变了，不是排版变了，
+      // 少掉的节点必须由重新布局补位，而不是在原位留一个洞。
+      let folded = 0;
+      if (inline) folded = collapseSignals(model);
 
       if (layoutFrom !== undefined) {
         if (!exists(layoutFrom)) {
@@ -223,7 +274,7 @@ export function main(argv: string[]): number {
         applyLayout(model, layout);
       }
 
-      const xml = toDrawio(model);
+      const xml = toDrawio(model, cards, rwLabels, straightEdges);
       const out = plan.out;
       ensureDir(dirname(out));
       writeTextFile(out, xml);
@@ -232,14 +283,41 @@ export function main(argv: string[]): number {
       if (svgOption !== undefined) {
         const svgOut = abspath(svgOption);
         ensureDir(dirname(svgOut));
-        writeTextFile(svgOut, toSvg(model));
+        writeTextFile(svgOut, toSvg(model, SVG_PADDING, cards, rwLabels, straightEdges));
         svgNote = ` + ${svgOut}`;
       }
 
+      // signals= 报的是**折叠前**的信号数：它和调用方看到的源码一一对应，
+      // 折了多少另用 folded= 报，否则这个数会随排版选项变化，没法当校验依据。
+      const inlineNote = inline ? ` folded=${folded}` : "";
       console.log(
-        `signals=${model.signals.size} funcs=${model.funcs.size} edges=${model.edges.length} -> ${out}${svgNote}`,
+        `signals=${model.signals.size} funcs=${model.funcs.size} edges=${model.edges.length} -> ${out}${svgNote}${inlineNote}`,
       );
     }
+    return 0;
+  }
+
+  if (cmd === "dump-ir") {
+    const files = positionals;
+    if (files.length === 0) {
+      console.error("drawcode: dump-ir 至少需要一个源文件");
+      return 2;
+    }
+    const root = rootOption ?? dirname(abspath(files[0] as string));
+    const model = parseAny(files, root);
+    const json = dumpIrJson(model);
+    const outOption = typeof values.out === "string" ? values.out : undefined;
+    if (outOption === undefined) {
+      // 没有 --out 时只输出 JSON 本体，方便 `| jq` 或重定向 —— 提示文字会弄脏产物。
+      process.stdout.write(json);
+      return 0;
+    }
+    const out = abspath(outOption);
+    ensureDir(dirname(out));
+    writeTextFile(out, json);
+    console.log(
+      `signals=${model.signals.size} funcs=${model.funcs.size} edges=${model.edges.length} devices=${model.devices.size} -> ${out}`,
+    );
     return 0;
   }
 

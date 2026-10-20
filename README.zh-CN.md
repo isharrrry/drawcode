@@ -7,7 +7,7 @@
 > 并把你手工排好的布局读回代码。三个独立实现：Python、TypeScript、.NET 10。
 
 可在 Windows、Linux 与 macOS 上运行。任何实现都没有第三方运行时依赖：
-Python 3.10+、Node 18+，或 .NET 10（任选一个）。
+Python 3.10+、Node 22.6+，或 .NET 10（任选一个）。
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -117,7 +117,7 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ## 开发
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 71 tests
+cd python && python -m unittest discover -s tests -t .    # 124 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -134,7 +134,7 @@ Python 3.14.6，Node 24.16.0，
 
 | 主张 | 如何测量 | 结果 |
 | :--- | :--- | :--- |
-| Python 实现是正确的 | `python -m unittest discover -s tests -t .` | **71 个测试，0 失败，0 跳过** |
+| Python 实现是正确的 | `python -m unittest discover -s tests -t .` | **124 个测试，0 失败，0 跳过** |
 | 压缩态 `.drawio` 被正确读取 | 读回一个 draw.io 压缩过的金标准文件 | **nodes=6, edges=6, attrs=6** —— 与纯文本形态完全相同 |
 | 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛 `ValueError` |
 | 生成的 `.drawio` 符合 schema | 用 `lxml` XMLSchema 对着 `tools/xsd/mxfile.xsd` 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |

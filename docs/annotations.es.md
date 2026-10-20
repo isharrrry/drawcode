@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Anotaciones
-description: Referencia a nivel de campo de cada clave de anotación — los bloques de comentario @drawcode y @device de C, y los atributos Drawcode y Device de C#
+description: Referencia a nivel de campo de cada clave de anotación — los bloques de comentario @drawcode y @device de C, y los atributos Drawcode, Device y Callout de C#
 tags: [annotations, parsing, attributes, comments, reference]
 status: stable
 ---
@@ -47,7 +47,7 @@ La declaración se reconoce con una expresión regular orientada a líneas, una 
 - **Una declaración por línea, terminada en `;`.** El punto y coma final forma parte de la coincidencia; una declaración repartida en varias líneas no se reconoce.
 - **La declaración debe llevar `@drawcode`.** Un bloque de comentario sin anotación, o una anotación sobre una construcción que no es una variable de nivel superior, no produce ninguna señal.
 - **Los declaradores de array se pliegan en el tipo.** `float g_coeff[32];` produce `name = g_coeff` y `ctype = float[32]`; el sufijo se vuelve a pegar al tipo, de modo que la etiqueta dice `float[32] / in / coeff`.
-- **Las señales aceptan `dir`, `unit`, `alias`, `note` y `external`.** Las claves de geometría pertenecen a las funciones — véanse las tablas de claves más abajo.
+- **Las señales aceptan todas las claves de la tabla de señales de más abajo, geometría incluida.** `xy`, `size` y `style` se leen en una variable exactamente igual que en una función — pero solo las leen los frontales de TypeScript, así que consulta [Dónde surten efecto las claves de geometría](#dónde-surten-efecto-las-claves-de-geometría) antes de confiar en ellas.
 
 ## Dirección en C#: el atributo `[Drawcode]`
 
@@ -65,7 +65,7 @@ public static short g_raw;
 | `[Drawcode(Direction.Io)]` | `inout` |
 | `[Drawcode]` / `[Drawcode(Direction.None)]` | `""` |
 
-El atributo se vincula a la **siguiente declaración de campo, propiedad o método** que le sigue, ignorando líneas en blanco, `using`, `namespace`, las que empiezan por `#` y las llaves sueltas. El argumento posicional puede omitirse (`[Drawcode(Alias = "…")]`), en cuyo caso el miembro queda documentado pero sin dirección. `DrawcodeAttribute`, `DeviceAttribute` y `Direction` deben existir en tu proyecto — copia [`examples/small/cs/DrawcodeAttributes.cs`](../examples/small/cs/DrawcodeAttributes.cs) una vez.
+El atributo se vincula a la **siguiente declaración de campo, propiedad o método** que le sigue, ignorando líneas en blanco, `using`, `namespace`, las que empiezan por `#` y las llaves sueltas. El argumento posicional puede omitirse (`[Drawcode(Alias = "…")]`), en cuyo caso el miembro queda documentado pero sin dirección. `DrawcodeAttribute`, `DeviceAttribute`, `CalloutAttribute` y `Direction` deben existir en tu proyecto — copia [`examples/small/cs/DrawcodeAttributes.cs`](../examples/small/cs/DrawcodeAttributes.cs) una vez.
 
 ## Sintaxis de anotaciones
 
@@ -100,7 +100,7 @@ En C, las líneas `///` consecutivas se acumulan y se **vacían** al alcanzar un
 Los pares clave/valor en C se leen con `(\w+)\s*=\s*"([^"]*)"`: **las claves son palabras simples, los valores van entre comillas dobles y un valor no puede contener comillas dobles.** En C# las claves son propiedades con nombre del atributo. Las claves desconocidas se ignoran en silencio en lugar de provocar un error, lo que mantiene las anotaciones compatibles hacia adelante entre implementaciones.
 ## Referencia de claves: señales
 
-Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos y propiedades con `[Drawcode]` en C#. Las cinco claves se comportan igual en ambos lenguajes; `dir` se documenta arriba.
+Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos y propiedades con `[Drawcode]` en C#. Las cinco primeras claves se comportan igual en ambos lenguajes y en todas las implementaciones; las tres últimas son geometría, y **TypeScript es la única implementación que las lee**. `dir` se documenta arriba.
 
 | Clave | Tipo | Valor por defecto | Efecto | Ejemplo |
 | :--- | :--- | :--- | :--- | :--- |
@@ -108,6 +108,9 @@ Se aplica a las variables de nivel superior con `@drawcode` en C y a los campos 
 | `alias` | cadena | `""` | Nombre humano usado como **atributo personalizado** del nodo (no en la etiqueta). La etiqueta siempre muestra el identificador de C. | `alias="原始采样值"` |
 | `note` | cadena | `""` | Comentario de texto libre, escrito en los atributos personalizados del `<object>`. No se renderiza en la etiqueta. | `note="上电后需校准"` |
 | `external` | `"true"` / ausente | `false` | Marca la señal como procedente de fuera del conjunto de módulos. Se analiza como la cadena `"true"`; cualquier otro valor, incluido `"True"`, la deja en `false`. | `external="true"` |
+| `xy` | `"x,y"` | sin definir | Coordenadas absolutas del lienzo, que anulan el apilado por defecto. **Solo las lee TypeScript** (véase abajo). | `xy="420,160"` |
+| `size` | `"WxH"` | `160x60` para señales, `180x72` para funciones | Tamaño inicial del nodo; el separador es una `x` minúscula. **Solo las lee TypeScript.** | `size="180x72"` |
+| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo (coloreado por rol y similares). **Solo las lee TypeScript.** Un valor vacío deja la salida idéntica byte a byte. | `style=";fillColor=#e8f0fe"` |
 
 La etiqueta se ensambla con `name` en la primera línea y `ctype / dir / unit` en la segunda, omitiendo las partes vacías — así que una señal sin `unit` dice `int16_t / in`, no `int16_t / in / `.
 
@@ -120,12 +123,30 @@ Se aplica a las declaraciones de función en C y a los métodos en C#.
 | `alias` | cadena | `""` | Se usa como **línea de título** del nodo en lugar del nombre de la función (`ADC 采样()` en vez de `adc_read()`). El nombre real sigue apareciendo en la segunda línea. | `alias="ADC 采样"` |
 | `note` | cadena | `""` | Comentario de texto libre, escrito en los atributos personalizados del `<object>`. | `note="上电后需先校准"` |
 | `tooltip` | cadena | `""` | Texto emergente, escrito en los atributos personalizados del `<object>`. | `tooltip="上电后需先校准"` |
-| `asset` | cadena | `""` | Ruta de una imagen para el nodo, escrita en los atributos personalizados del `<object>`. **La ruta se registra, no se resuelve** — no se lee ningún fichero y un destino inexistente no es un error. | `asset="assets/ads1115.svg"` |
+| `asset` | cadena | `""` | Ruta de una imagen para el nodo, escrita en los atributos personalizados del `<object>`. **La ruta se registra, no se resuelve** — no se lee ningún fichero y un destino inexistente no es un error. Con `--cards` se convierte en la imagen de la tarjeta (véase [Tarjetas de imagen](#tarjetas-de-imagen---cards)). | `asset="assets/ads1115.svg"` |
 | `external` | `"true"` / ausente | `false` | Cambia el estilo del nodo a la forma externa discontinua. | `external="true"` |
 | `xy` | `"x,y"` | sin definir | Posición inicial del nodo en el lienzo, en coordenadas absolutas del lienzo. Anula el apilado por defecto para este nodo. | `xy="420,160"` |
 | `size` | `"WxH"` | `180x72` | Tamaño inicial del nodo. El separador es una `x` minúscula; el valor se pasa a minúsculas antes de dividirlo, así que `180X72` también sirve. | `size="180x72"` |
+| `style` | cadena | `""` | Fragmento añadido tal cual al final de la cadena de estilo del nodo. **Solo las lee TypeScript**, igual que la fila de señales. | `style=";fillColor=#dae8fc"` |
 
-**La geometría de nodo es exclusiva de C: tanto `xy` como el `size` de nodo se leen en un solo lado.** `csparse.py` nunca llama a `meta.get("xy")` ni a `meta.get("size")`, así que un método de C# siempre se coloca y se dimensiona con el algoritmo por defecto. No lo confundas con la clave `size` de `@device` / `[Device]`, que es el tamaño físico del encapsulado y **sí** se lee en ambos lados — son claves distintas que casualmente comparten nombre. Es una asimetría real entre los dos frontales, no un descuido de este documento.
+No mezcles los separadores: `xy` lleva una coma y `size` lleva una **`x` minúscula**. Escribir el equivocado **no** provoca ningún error — produce un nodo con tamaño `NaN`, situado en `(NaN, NaN)` y dimensionado `(NaN, NaN)`, que resulta invisible en draw.io.
+
+### Dónde surten efecto las claves de geometría
+
+Las tres claves funcionan igual en **ambos** lenguajes y sobre **ambos** tipos de entidad — quien decide si se leen o no es la **implementación**, no el lenguaje. Esta sección antes lo contaba mal en dos direcciones, así que abajo va solo la tabla:
+
+| | TypeScript (`cparse.ts` / `csparse.ts`) | Implementación de referencia (`cparse.py` / `csparse.py` / `CsParse.cs`) |
+| :--- | :--- | :--- |
+| `xy` / `size` sobre una **función** | se leen y se aplican | C: se leen y se aplican. **C#: no se leen en absoluto** |
+| `xy` / `size` sobre una **señal** | se leen y se aplican | **no se leen en absoluto** — `cparse.py` lee el par solo dentro de su rama de funciones |
+| `style`, cualquier entidad | se lee y se añade al estilo del nodo | **no se lee en absoluto** |
+| reescritura por `sync` | sí, solo en las entidades cuya geometría cambió el diagrama — véase [Reescritura](#reescritura) | **nada** |
+
+La fila que muerde es la de la señal. `cparse.py` lee `xy` **después** de su bucle de señales, en la rama de funciones: un `/// @drawcode xy="420,160"` escrito sobre una variable se analiza y acto seguido se descarta, y la señal vuelve a apilarse con el algoritmo por defecto. `csparse.py` lo dice con todas las letras en su propia cabecera: su `[Drawcode]` no tiene propiedad `Size` y nunca llama a `meta.get("xy")`, así que cada método que analiza queda colocado por el algoritmo por defecto.
+
+**Todas las implementaciones ignoran las claves desconocidas en lugar de provocar un error**, así que nada de esto se anuncia solo: cambias de implementación y el diagrama cambia de forma sin ningún error, y el IR es idéntico en ambos casos — el L1 de `conformance.md` excluye a propósito `x`/`y`/`w`/`h`, así que ningún caso dorado puede detectarlo. Antes de dar por hecho que dos implementaciones coinciden sobre un fuente que lleva geometría, véase Known divergence en `conformance.md`.
+
+No confundas estas claves con la clave `size` de `@device` / `[Device]`, que es el tamaño físico del encapsulado de una pieza y **sí** se lee en ambos lados — son claves distintas que casualmente comparten nombre.
 
 ## Referencia de claves: dispositivos
 
@@ -152,6 +173,47 @@ Se aplica a las declaraciones de función en C y a los métodos en C#.
 | Un valor erróneo provoca | una excepción en `float()` — este es el único punto donde una anotación mal formada es fatal | nada; se acepta cualquier cadena |
 
 Como ambas se escriben con la misma sintaxis `k="v"` y ambas aparecen en el mismo bloque de comentario, este es el error de anotación más frecuente. La distinción está en bajo qué etiqueta se encuentra la clave.
+
+## Bloques de texto libre: `[Callout]`
+
+Un recuadro en el que puedes poner texto. Rellena el hueco que deja el sistema de claves: las claves de anotación decoran elementos que ya existen, pero no pueden añadir nada nuevo — así que no había dónde escribir un título de sección, una leyenda o una nota que diga qué omite el diagrama a propósito.
+
+```csharp
+[Callout("Platform interior — device and relation groups live on this side",
+         Xy = "40,40", Size = "260x60", Style = "band")]
+[Callout("IO closed loop: parameters ⇄ commands", Xy = "40,120", Size = "240x40", Style = "box", Font = 13)]
+```
+
+| Argumento | Valor | Notas |
+| :--- | :--- | :--- |
+| primer argumento posicional | cadena entre comillas dobles | **debe ir primero** y no puede contener comillas dobles. Puede contener `<br>` para un salto de línea |
+| `Xy` | `"x,y"` | coordenadas **absolutas** del lienzo, escritas exactamente igual que la geometría de nodo |
+| `Size` | `"WxH"` | separador `x` minúscula. Por defecto, `240x40` |
+| `Style` | `text` / `box` / `band` | texto sin borde / recuadro con fondo / banda de sección ancha. Un valor no reconocido recae en `text` |
+| `Font` | número | tamaño de fuente. `0` o ausente usa el valor por defecto del tipo (`text`/`box` 12, `band` 15) |
+
+**No se vincula a la entidad sobre la que está escrito.** La línea `[Callout]` se escribe encima de algún método o campo solo para que viva en el mismo fichero que el diagrama — su posición proviene por completo de `Xy`, con independencia de dónde acabe su entidad anfitriona. Una declaración puede llevar **varias** líneas `[Callout]` (son una lista, no un diccionario, así que no se sobrescriben entre sí).
+
+Nótese que `Style` aquí significa «tipo de bloque de texto» y en `[Drawcode]` «fragmento añadido al estilo del nodo» — **mismo nombre, distinto significado**. Ambos se analizan en espacios de nombres de claves separados, de modo que escribir ambos en una misma declaración no puede hacer que colisionen.
+
+Tres cosas sorprenden a la gente:
+
+1. **`band` tiene que dibujarse antes que los contenedores.** Una celda se dibuja junto con todo su subárbol, y una banda es hija directa de la raíz; emitida después de los contenedores, aterriza *encima de* ese subárbol y cubre todas las tarjetas que hay dentro. Por eso el generador emite `band` **antes** de los contenedores y `text`/`box` después de las tarjetas — no tienes que gestionarlo tú, pero sí necesitas saberlo si cambias el orden de emisión.
+2. **Arrastrar un bloque de texto no hace la ida y vuelta.** `applyLayout` solo resuelve los ids de nodos y funciones, y omite todo lo demás. Mueve el bloque en draw.io, reconstruye con `--layout-from` y **volverá de un salto al `Xy` del código fuente**. Para moverlo, edita el código fuente.
+3. **Solo el frontal de C# de TypeScript conoce este atributo.** Ni `csparse.py` ni `CsParse.cs` leen `CalloutAttribute`, y ambos ignoran los atributos desconocidos en lugar de provocar un error — así que ejecutar el mismo fuente con otra implementación elimina los bloques de texto **por completo y en silencio**.
+
+## Tarjetas de imagen: `--cards`
+
+Dale una imagen al `Asset` de `@device` / `[Device]`, pasa `--cards` y el nodo de función se convierte en una tarjeta de imagen: la imagen llena la caja del nodo y el nombre de la función se empuja fuera, debajo del marco (dentro ya no queda sitio).
+
+```bash
+node bin/drawcode.ts build Drone.cs --cards --out devices.drawio --svg devices.svg
+```
+
+- Solo surte efecto cuando `--cards` está activado **y** `asset` no está vacío; sin esa opción, `asset` es solo un registro en el `<object>`.
+- `[Device(Asset = "…")]` se copia automáticamente a la función (si la función define su propio `asset`, prevalece el suyo), así que la imagen solo hay que declararla una vez.
+- La ruta es relativa **al propio fichero `.drawio`** y drawcode nunca la lee — un destino inexistente no es un error, la tarjeta simplemente se dibuja en blanco.
+- **Los renderizadores offline no leen ficheros de imagen externos por defecto.** Convertir ese SVG a PNG sin indicarle al renderizador el directorio de imágenes hace que las fotos desaparezcan del PNG mientras el SVG sigue viéndose bien. Eso es una trampa de la cadena de herramientas de renderizado, no un defecto del diagrama.
 
 ## Dónde acaba cada clave
 
@@ -214,9 +276,19 @@ Estas reglas no necesitan anotación porque se deducen de la estructura del cód
 | señal `dir` | la clave `dir=in` / `dir=out` / `dir=io` (C), o el argumento posicional `Direction.X` (C#) |
 | función `alias` `note` `tooltip` `external` | `/// @drawcode …` (C) o `[Drawcode(…)]` (C#) |
 | claves de dispositivo | `/// @device …` (C) o `[Device(…)]` (C#) |
+| `xy` / `size`, **solo donde el diagrama discrepa del fuente** | `xy="420,160" size="180x72"` (C) o `Xy = "420,160", Size = "180x72"` (C#) |
+| `style` | **nunca** — es una clave solo de entrada, como `clientX` en un elemento |
 | **cuerpo** de la función | **nunca** — esta es la restricción de diseño, no una carencia |
 
-Las claves que `drawcode` no gestiona — en particular un `xy` o un `size` escritos a mano en una función — se **conservan en su sitio**, en su orden original, cuando se reescribe la línea de anotación. Añadir una nota a una función anotada no descartará sus coordenadas en silencio.
+**Solo TypeScript.** Ni `cparse.py`/`codegen.py` ni el lado .NET reescriben la geometría, así que un diagrama que reordenas hace la ida y vuelta en TypeScript, y en las otras dos es **silenciosamente de un solo sentido**.
+
+La fila de geometría es condicional, y la condición es lo que mantiene honesto a `sync`. En todo el repositorio, `applyLayout` es el único sitio que sostiene los dos números a la vez — lo que el diagrama dice ahora y lo que `build` habría escrito (el `xy` que declara el propio fuente, o el diseño por defecto si no hay ninguno) — y solo registra las entidades en las que ambos difieren. **Esas diferencias son la única geometría que `sync` escribe jamás.** Así, un proyecto que nadie ha tocado produce ficheros idénticos byte a byte; un nodo arrastrado solo gana una clave; y un nodo que el fuente ya fijaba conserva su valor original, en lugar de reescribirse al mismo número con otra grafía.
+
+Tres consecuencias que conviene conocer antes de pasarle a alguien un diagrama para que lo reordene:
+
+- **La unidad es el contenedor, no el lienzo.** El XML guarda las coordenadas de `<mxGeometry>` relativas a la celda padre; la anotación guarda coordenadas **absolutas** del lienzo. La conversión vive en `drawio.ts` y `codegen.ts` — editar a mano solo una de las dos obliga a reproducir esa aritmética.
+- **Solo una celda que ha salido de `build` puede quedar fijada.** Una forma dibujada en draw.io no lleva `symbolId`, así que `applyLayout` nunca la ve y jamás se crea una entrada `pinned` para ella — tampoco en sincronizaciones posteriores, mucho después de que `adoptForeign` la declarara en el fuente. Medido, no inferido: adopta una señal en `(40,200)`, vuelve a sincronizar, arrastra esa misma celda a `(500,700)` y sincroniza otra vez — la anotación sigue desnuda, `/// @drawcode dir=in`, y el nodo vuelve al apilado por defecto en el siguiente `build`. **Para fijar un nodo que has añadido en el diagrama, primero `build` y luego arrastra la celda generada.**
+- **`style` nunca se escribe, así que tampoco se pierde nunca.** Las fusiones de C y de C# son clave por clave y no línea por línea, precisamente para que las claves que drawcode no gestiona sobrevivan en su sitio y en su orden original. Añadir una nota a una función anotada no descartará en silencio su fragmento de color.
 
 ## Relacionado
 

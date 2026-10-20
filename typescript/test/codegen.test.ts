@@ -4,14 +4,23 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 
-import { renderSignal, syncFunctions, syncHeader, syncSource } from "../src/codegen.ts";
+import {
+  renderCsAnnotation,
+  renderSignal,
+  syncCsMethods,
+  syncCsSource,
+  syncFunctions,
+  syncHeader,
+  syncSource,
+} from "../src/codegen.ts";
 import { parseProject } from "../src/cparse.ts";
+import { parseCsProject } from "../src/csparse.ts";
 import { applyLayout, readLayout, toDrawio } from "../src/drawio.ts";
 import { makeSignal } from "../src/model.ts";
-import type { Model } from "../src/model.ts";
+import type { Model, Signal } from "../src/model.ts";
 import type { XmlElement } from "../src/xml.ts";
 import { findChild, iterElements, parseXml, serializeXml } from "../src/xml.ts";
-import { EXAMPLES_C, REPO } from "./helpers.ts";
+import { EXAMPLES_C, EXAMPLES_CS, REPO } from "./helpers.ts";
 
 const NAMES = ["adc.h", "adc.c", "dsp.h", "dsp.c"];
 
@@ -365,6 +374,319 @@ test("edit-back: editing a .drawio on disk, then reading it back", () => {
     applyLayout(m, readLayout(fs.readFileSync(file, "utf8")));
     syncSource(path.join(dir, "adc.h"), m, "adc.h");
     assert.ok(readOf(dir, "adc.h").includes('dir=out unit="LSB"'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 几何回写（pinned）：把「人拖过的几何」写回源码注解，同时不抹掉源码里手写的键。
+//
+// 受管夹具里没有手写的 `xy`/`size`/`style`（作者手工钉过的几何），所以每个用例先往
+// temp 副本里**注入**这些键 —— 没有它们，「合并」与「整行重建」两种行为无法区分。
+// 每个注入型用例都配一条对照断言：直接调 `renderSignal`/`renderCsAnnotation`（即旧的
+// 「整行重建」路径产物）里没有这些手写键 —— 证明"保住原样"只可能来自合并路径；
+// 若哪天有人把实现改回重建，对照断言会先炸。
+// ---------------------------------------------------------------------------
+
+const CS_NAMES = ["Adc.cs", "Dsp.cs"];
+
+/** C# 信号注解行（夹具原样）与注入了手写 Xy/Size/Style 的版本。 */
+const CS_GRAW = '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准")]';
+const CS_GRAW_HAND =
+  '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]';
+
+function tempCsProject(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-ts-cs-"));
+  for (const n of CS_NAMES) {
+    fs.copyFileSync(path.join(EXAMPLES_CS, n), path.join(dir, n));
+  }
+  return dir;
+}
+
+function parseCsDir(dir: string): Model {
+  return parseCsProject(
+    CS_NAMES.map((n) => path.join(dir, n)),
+    dir,
+  );
+}
+
+/**
+ * 往 temp 副本里注入手写键，模拟「作者手工钉过几何」。
+ * 锚点找不到就断言失败（而不是静默不注入）——夹具漂移时测试必须响，不能空转通过。
+ */
+function injectOnce(dir: string, name: string, from: string, to: string): void {
+  const p = path.join(dir, name);
+  const text = fs.readFileSync(p, "utf8");
+  assert.ok(text.includes(from), `fixture drift: ${name} 里找不到注入锚点: ${from}`);
+  fs.writeFileSync(p, text.replace(from, to), "utf8");
+}
+
+/** 一个方法组件的真实形状：`[Drawcode]` 与签名之间隔着 `[Device]`，且带手写几何。 */
+const DEVICES_CS = `namespace Drawcode
+{
+    public static class Devices
+    {
+        [Drawcode(Alias = "采集计算机", Asset = "图片/设备-采集计算机.png", Note = "采集设备主机", Xy = "1480,260", Size = "220x165")]
+        [Device(Model = "示例型号")]
+        public static Hardware dev_collector()
+        {
+            return null;
+        }
+
+        [Device(Model = "另一台")]
+        [Drawcode(Alias = "设备二", Xy = "100,100")]
+        public static Hardware dev_other()
+        {
+            return null;
+        }
+
+        [Drawcode(Alias = "分离注解", Xy = "10,20")]
+
+        public static Hardware dev_sep()
+        {
+            return null;
+        }
+    }
+}`;
+
+test("codegen: hand-written signal geometry survives an unrelated C sync (the pre-fix erase)", () => {
+  const dir = tempProject();
+  try {
+    injectOnce(
+      dir,
+      "adc.h",
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准"',
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准" xy="40,120" size="160x60" style="rounded=0;"',
+    );
+    const m = parseDir(dir);
+    const sig = m.signals.get("adc.h::g_raw") as Signal;
+    sig.alias = "改名后的采样值";
+    assert.ok(syncHeader(path.join(dir, "adc.h"), m, "adc.h"));
+    const text = readOf(dir, "adc.h");
+    // 手写的 xy/size/style 原样存活，alias 就地替换，dir 仍是裸值写法
+    assert.ok(
+      text.includes(
+        'dir=in unit="LSB" alias="改名后的采样值" note="上电后需校准" xy="40,120" size="160x60" style="rounded=0;"',
+      ),
+    );
+    // 对照组：重建路径（旧实现）的产物里没有这些手写键 —— 抹掉是旧行为
+    assert.ok(!renderSignal(sig).includes("xy="));
+    assert.ok(!renderSignal(sig).includes("style="));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a dragged signal replaces its geometry in place, hand-written style survives", () => {
+  const dir = tempProject();
+  try {
+    injectOnce(
+      dir,
+      "adc.h",
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准"',
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准" xy="40,120" size="160x60" style="rounded=0;"',
+    );
+    const m = parseDir(dir);
+    m.pinned.set("adc.h::g_raw", { xy: [420, 160], size: [180, 72] });
+    assert.ok(syncHeader(path.join(dir, "adc.h"), m, "adc.h"));
+    const text = readOf(dir, "adc.h");
+    // 逗号 + 小写 x：与 cparse.applyGeometry 的切法逐字一致（写错会静默得到 NaN 尺寸）
+    assert.ok(text.includes('xy="420,160" size="180x72"'));
+    assert.ok(!text.includes('xy="40,120"'));
+    assert.ok(text.includes('style="rounded=0;"'));
+    assert.ok(text.includes('alias="原始采样值"'));
+
+    // 幂等：回写后的文件重新解析（pinned 自然为空），再 sync 必须不动
+    const before = readOf(dir, "adc.h");
+    assert.equal(syncHeader(path.join(dir, "adc.h"), parseDir(dir), "adc.h"), false);
+    assert.equal(readOf(dir, "adc.h"), before);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a dragged function replaces only the dragged axis, in place", () => {
+  const dir = tempProject();
+  try {
+    const m = parseDir(dir);
+    // 只拖了位置：手写的 size 不该被动（pinned.size 省略 = 这次没被缩放）
+    m.pinned.set("adc.h::adc_read", { xy: [420, 260] });
+    assert.ok(syncFunctions(path.join(dir, "adc.h"), m, "adc.h"));
+    const text = readOf(dir, "adc.h");
+    assert.ok(
+      text.includes('/// @drawcode alias="ADC 采样" xy="420,260" size="180x72" tooltip="上电后需先校准"'),
+    );
+    assert.ok(!text.includes('xy="420,160"'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a dragged function without geometry gets xy and size appended", () => {
+  const dir = tempProject();
+  try {
+    const m = parseDir(dir);
+    m.pinned.set("dsp.h::fir_apply", { xy: [300, 300], size: [200, 90] });
+    assert.ok(syncFunctions(path.join(dir, "dsp.h"), m, "dsp.h"));
+    const text = readOf(dir, "dsp.h");
+    assert.ok(text.includes('/// @drawcode alias="FIR 滤波" xy="300,300" size="200x90"'));
+    // 没被拖过的邻居一字不动
+    assert.ok(text.includes('/// @drawcode alias="设置增益"'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a keyless empty-dir signal still round-trips (no bare annotation)", () => {
+  const dir = tempProject();
+  try {
+    const m = parseDir(dir);
+    m.addSignal(
+      makeSignal({ id: "adc.h::g_nd", name: "g_nd", ctype: "int16_t", dir: "", file: "adc.h" }),
+    );
+    assert.ok(syncHeader(path.join(dir, "adc.h"), m, "adc.h"));
+    // 键全空时也必须落一个可读回的键；光写 `/// @drawcode` 解析侧不认
+    assert.ok(readOf(dir, "adc.h").includes('/// @drawcode dir=""\nint16_t g_nd;'));
+    const m2 = parseDir(dir);
+    const back = m2.signals.get("adc.h::g_nd");
+    assert.ok(back !== undefined, "读不回来 ⇒ 下次 sync 会把它当新元素重复追加");
+    assert.equal(back?.dir, "");
+    const before = readOf(dir, "adc.h");
+    assert.equal(syncHeader(path.join(dir, "adc.h"), m2, "adc.h"), false);
+    assert.equal(readOf(dir, "adc.h"), before);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: no drags means byte-identical C output (the headline criterion)", () => {
+  const dir = tempProject();
+  try {
+    // 连手写键也一起就位：没人拖过时，连它们也一字不动
+    injectOnce(
+      dir,
+      "adc.h",
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准"',
+      '/// @drawcode dir=in unit="LSB" alias="原始采样值" note="上电后需校准" xy="40,120" size="160x60" style="rounded=0;"',
+    );
+    const m = parseDir(dir);
+    const before = Object.fromEntries(NAMES.map((n) => [n, readOf(dir, n)]));
+    for (const p of pathsOf(dir)) {
+      assert.equal(syncSource(p, m, path.basename(p)), false, `${path.basename(p)} 不该被写`);
+    }
+    for (const n of NAMES) assert.equal(readOf(dir, n), before[n]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: hand-written C# signal args survive (Style, Xy) with an empty pinned", () => {
+  const dir = tempCsProject();
+  try {
+    injectOnce(dir, "Adc.cs", CS_GRAW, CS_GRAW_HAND);
+    const m = parseCsDir(dir);
+    const sig = m.signals.get("Adc.cs::g_raw") as Signal;
+    sig.alias = "改名后的采样值";
+    assert.ok(syncCsSource(path.join(dir, "Adc.cs"), m, "Adc.cs"));
+    const text = readOf(dir, "Adc.cs");
+    // 位置参数 Direction.In 原位、手写 Xy/Size/Style 原样，只有 Alias 被就地替换
+    assert.ok(
+      text.includes(
+        '[Drawcode(Direction.In, Unit = "LSB", Alias = "改名后的采样值", Note = "上电后需校准", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]',
+      ),
+    );
+    // 对照组：重建路径（旧实现）的产物里没有 Xy/Style —— 抹掉是旧行为
+    const rebuilt = renderCsAnnotation(sig).join("");
+    assert.ok(!rebuilt.includes("Xy"));
+    assert.ok(!rebuilt.includes("Style"));
+    // 没被动过的邻居（Direction.Out 位置参数）一字不动
+    assert.ok(text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出")]'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a dragged C# signal replaces Xy/Size in place and appends when absent", () => {
+  const dir = tempCsProject();
+  try {
+    injectOnce(dir, "Adc.cs", CS_GRAW, CS_GRAW_HAND);
+    const m = parseCsDir(dir);
+    m.pinned.set("Adc.cs::g_raw", { xy: [400, 200], size: [200, 80] });
+    m.pinned.set("Adc.cs::g_filtered", { xy: [500, 250] });
+    assert.ok(syncCsSource(path.join(dir, "Adc.cs"), m, "Adc.cs"));
+    const text = readOf(dir, "Adc.cs");
+    assert.ok(
+      text.includes(
+        '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准", Xy = "400,200", Size = "200x80", Style = "strokeColor=#4d7ea8;")]',
+      ),
+    );
+    // 原本没有几何的信号：Xy 追加到实参末尾，Direction.Out 位置参数仍在首位
+    assert.ok(text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出", Xy = "500,250")]'));
+
+    // 幂等：回写后重新解析（pinned 自然为空），再 sync 必须不动
+    const before = readOf(dir, "Adc.cs");
+    assert.equal(syncCsSource(path.join(dir, "Adc.cs"), parseCsDir(dir), "Adc.cs"), false);
+    assert.equal(readOf(dir, "Adc.cs"), before);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: a dragged C# method merges its Drawcode line, [Device] and signature untouched", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-ts-csdev-"));
+  try {
+    const file = path.join(dir, "Devices.cs");
+    fs.writeFileSync(file, DEVICES_CS, "utf8");
+
+    // 没人拖动：一行都不许动（手写 Xy/Size 原样）
+    const m0 = parseCsProject([file], dir);
+    assert.equal(syncCsMethods(file, m0, "Devices.cs"), false);
+    assert.equal(readOf(dir, "Devices.cs"), DEVICES_CS);
+
+    // 拖了两个方法：真实形状（[Drawcode] 与签名隔着 [Device]）与反序形状都要命中
+    const m = parseCsProject([file], dir);
+    m.pinned.set("Devices.cs::dev_collector", { xy: [1400, 240], size: [240, 180] });
+    m.pinned.set("Devices.cs::dev_other", { xy: [150, 150], size: [160, 80] });
+    assert.ok(syncCsMethods(file, m, "Devices.cs"));
+    const after = readOf(dir, "Devices.cs");
+
+    // 只允许两行变化，且都是 Drawcode 行 —— Device 行、签名、方法体逐字节不动
+    const before = DEVICES_CS.split("\n");
+    const now = after.split("\n");
+    assert.equal(now.length, before.length);
+    const changed = now.filter((l, i) => l !== before[i]);
+    assert.equal(changed.length, 2);
+    for (const l of changed) assert.ok(l.includes("[Drawcode("), `只有 Drawcode 行允许变化: ${l}`);
+
+    assert.ok(
+      after.includes(
+        '        [Drawcode(Alias = "采集计算机", Asset = "图片/设备-采集计算机.png", Note = "采集设备主机", Xy = "1400,240", Size = "240x180")]',
+      ),
+    );
+    assert.ok(after.includes('        [Drawcode(Alias = "设备二", Xy = "150,150", Size = "160x80")]'));
+    assert.ok(after.includes('        [Device(Model = "示例型号")]'));
+    assert.ok(after.includes("public static Hardware dev_collector()"));
+    // 空行隔断的注解：解析侧不认（readMeta 遇空行清缓冲），回写侧同样不碰
+    assert.ok(after.includes('        [Drawcode(Alias = "分离注解", Xy = "10,20")]'));
+
+    // 幂等：重新解析后 pinned 为空，第二趟必须报"没改"
+    assert.equal(syncCsMethods(file, parseCsProject([file], dir), "Devices.cs"), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: no drags means byte-identical C# output (syncSource runs both passes)", () => {
+  const dir = tempCsProject();
+  try {
+    injectOnce(dir, "Adc.cs", CS_GRAW, CS_GRAW_HAND);
+    const m = parseCsDir(dir);
+    const before = Object.fromEntries(CS_NAMES.map((n) => [n, readOf(dir, n)]));
+    for (const n of CS_NAMES) {
+      assert.equal(syncSource(path.join(dir, n), m, n), false, `${n} 不该被写`);
+    }
+    for (const n of CS_NAMES) assert.equal(readOf(dir, n), before[n]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

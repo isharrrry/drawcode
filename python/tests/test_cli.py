@@ -319,7 +319,7 @@ class TestNestedContainers(unittest.TestCase):
             self.assertGreaterEqual(y, sampling[1] - 1e-6, "%s 跑到容器上边界之外" % key)
             self.assertLessEqual(y, sampling[1] + sampling[3], "%s 跑到容器下边界之外" % key)
 
-
+    def test_sibling_subtrees_do_not_share_a_column(self):
         """兄弟子树必须各占一列，不能叠在一起。
 
         这条才是布局的判据：只断言「容器 cell 存在」是不够的 —— 容器 cell 由节点树
@@ -348,6 +348,25 @@ class TestNestedContainers(unittest.TestCase):
         m = parse_project([os.path.join(self.tmp, "x.h")], root=self.tmp)
         sig = m.signals["x.h::g_toplevel"]
         self.assertEqual(("x", "x"), (sig.group, sig.path))
+
+
+class DumpIrCase(unittest.TestCase):
+    """`dump-ir` 是 L1 一致性比较的公开入口，产物必须与金标准逐字节一致。"""
+
+    def test_dump_ir_matches_the_golden(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        out = os.path.join(tmp, "ir.json")
+        files = [os.path.join(EX, f) for f in ADCS + DSPS]
+        self.assertEqual(0, cli.main(["dump-ir", *files, "--root", EX, "--out", out]))
+        with open(out, encoding="utf-8", newline="") as fh:
+            got = fh.read()
+        with open(
+            os.path.join(_REPO, "tests", "golden", "small-c", "expected.ir.json"),
+            encoding="utf-8",
+            newline="",
+        ) as fh:
+            self.assertEqual(got, fh.read())
 
 
 if __name__ == "__main__":

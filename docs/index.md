@@ -12,7 +12,7 @@ the other two are faithful translations, not summaries. All three are updated in
 | Topic | Language versions | What it covers |
 | :--- | :--- | :--- |
 | **Architecture** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | The layering, what each module owns, the two data flows (build and sync), and the reasoning behind refusing to persist an intermediate representation |
-| **Annotations** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Field-level reference for every annotation key: `@drawcode` and `@device` comments (C), `[Drawcode]` and `[Device]` attributes (C#) — with types, defaults and examples |
+| **Annotations** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Field-level reference for every annotation key: `@drawcode` and `@device` comments (C), `[Drawcode]`, `[Device]` and `[Callout]` attributes (C#) — with types, defaults and examples |
 | **`.drawio` format** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Element mapping, coordinate semantics, anchor and routing rules, and draw.io's compressed storage form |
 | **Benchmark** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | Measured performance across the three implementations, with the raw numbers and where the time actually goes |
 | **Implementations** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | How to build, test and invoke each of the Python, TypeScript and .NET versions |

@@ -27,6 +27,10 @@ export function parseAny(paths: string[], root?: string): Model {
     for (const [k, v] of sub.signals) merged.signals.set(k, v);
     for (const [k, v] of sub.funcs) merged.funcs.set(k, v);
     for (const [k, v] of sub.devices) merged.devices.set(k, v);
+    // callouts 是数组而非 Map：混合语言（.c + .cs）时早先漏掉这一行，
+    // C# 前端声明的说明框会静默消失，只有单语言输入才正常。
+    // 顺序按 parts（C 在前、C# 在后），与文件列表顺序一致，输出可复现。
+    merged.callouts.push(...sub.callouts);
     merged.files.push(...sub.files);
   }
   merged.rebuildEdges();

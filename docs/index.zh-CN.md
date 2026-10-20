@@ -12,7 +12,7 @@
 | 主题 | 语言版本 | 涵盖内容 |
 | :--- | :--- | :--- |
 | **架构** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | 分层、每个模块的职责边界、两条数据流（build 与 sync），以及拒绝持久化中间表示的理由 |
-| **注解** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | 每个注解键的字段级参考：`@drawcode` 与 `@device` 注释（C）、`[Drawcode]` 与 `[Device]` 特性（C#）—— 含类型、默认值与示例 |
+| **注解** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | 每个注解键的字段级参考：`@drawcode` 与 `@device` 注释（C）、`[Drawcode]`、`[Device]` 与 `[Callout]` 特性（C#）—— 含类型、默认值与示例 |
 | **`.drawio` 格式** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | 元素映射、坐标系语义、锚点与路由规则，以及 draw.io 的压缩存储形态 |
 | **基准测试** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | 三套实现的实测性能，含原始数字与耗时实际去向 |
 | **各语言实现** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | 如何构建、测试与调用 Python、TypeScript、.NET 三套实现 |

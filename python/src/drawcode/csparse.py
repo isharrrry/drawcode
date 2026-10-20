@@ -47,14 +47,46 @@ MODIFIERS = (
     "virtual|override|abstract|sealed|async|extern|unsafe|new|partial"
 )
 
+# C# 类型片段与名字的字符集：首字符是任意 Unicode 字母或下划线，后续是字母、数字、
+# 下划线与类型语法里常见的 `. < > , [ ] ?`。
+#
+# 为什么不能用 `[A-Za-z_]`：本项目的部分关系字段类型是中文结构体（`数据包`），
+# ASCII 正则会让整条声明**静默地**不被当成信号 —— 图上少一个节点，而且不报任何错。
+# 名字位置与类型位置必须是同一字符集：C# 编译器接受中文标识符，解析器没有理由只认
+# ASCII；信号名、函数名都可能是中文，图上要显示的就是「哪个模块、传了什么」。
+#
+# Python 的 `re` 没有 `\p{L}`，用 `[^\W\d]` 表达「Unicode 字母或下划线」：
+# Python 3 的 `\w` 默认就是 Unicode 语义，从中去掉数字（`\d`）即可。与 TS 的
+# `[\p{L}_]` 等价（`\w` 里的标识符字符 = 字母 + 数字 + 下划线）。
+#
+# 放宽名字后，原本靠「ASCII 看不见」挡在图外的两类声明必须显式处理：
+#   · `record` 类型声明与记录体里的方法 → 由 RECORD_DECL_RE 整段跳过；
+#   · 支撑件里的泛型桩方法（`生成<T>()` / `处理<T>(T)`）→ 名字后跟 `<` 而不是 `(`，
+#     天然不匹配 CS_FUNC_RE。
+_IDENT = r"[^\W\d]\w*"
+_TYPE = r"[^\W\d][\w\.<>,\[\]\?]*"
+
 FIELD_RE = re.compile(
-    r"^\s*(?:(?:%s)\s+)*(?P<ctype>[A-Za-z_][\w\.<>,\[\]\?]*)\s+"
-    r"(?P<name>[A-Za-z_]\w*)\s*(?:=[^;]*)?;\s*$" % MODIFIERS
+    r"^\s*(?:(?:%s)\s+)*(?P<ctype>%s)\s+"
+    r"(?P<name>%s)\s*(?:=[^;]*)?;\s*$" % (MODIFIERS, _TYPE, _IDENT)
 )
 
 CS_FUNC_RE = re.compile(
-    r"^\s*(?:(?:%s)\s+)*(?P<ret>[A-Za-z_][\w\.<>,\[\]\?]*)\s+"
-    r"(?P<name>[A-Za-z_]\w*)\s*\((?P<params>[^)]*)\)\s*\{?\s*$" % MODIFIERS
+    r"^\s*(?:(?:%s)\s+)*(?P<ret>%s)\s+"
+    r"(?P<name>%s)\s*\((?P<params>[^)]*)\)\s*\{?\s*$" % (MODIFIERS, _TYPE, _IDENT)
+)
+
+# `record` 声明的开头。解析时必须**整段跳过**（与 TS 的 RECORD_DECL_RE 同义）。
+#
+# 名字位置放开到 Unicode 之后，`public sealed record 采样帧(...)` 与普通方法签名
+# 完全同形；记录体里的 `public 帧头 下一帧()` 也会变成组件函数。数据类型文件
+# （`示例数据结构.cs`）不是被测模型，整段跳过记录声明是唯一不误伤设备类里真实方法的
+# 办法 —— 设备类用 `class`，不在这个正则里。
+#
+# 只跳过 `record`，不跳过 `class`：模型源文件本身就是 `public static class 设备名`，
+# 连类一起跳会把整张图清空。
+RECORD_DECL_RE = re.compile(
+    r"^\s*(?:(?:public|private|internal|protected|static|sealed|abstract|readonly|partial|unsafe|new)\s+)*record\b"
 )
 
 # These lines end an annotation block without consuming it as a declaration.
@@ -129,17 +161,52 @@ def parse_cs_project(paths, root=None):
 
     for rel, lines in loaded:
         buf = []
-        for lineno, raw in enumerate(lines, 1):
+        # 用下标循环而不是 enumerate：record 声明要连同记录体**整段**跳过，
+        # 必须能移动游标（与 TS 的 `index = j; continue`、.NET 的 `idx = j` 同构）。
+        index = 0
+        while index < len(lines):
+            raw = lines[index]
+            lineno = index + 1
             s = raw.strip()
             # 注解行：`///` 文档注释或 `[...]` 特性，先攒着
             if s.startswith("///") or s.startswith("["):
                 buf.append(raw)
+                index += 1
                 continue
             if not s:
                 buf = []
+                index += 1
                 continue
             if s.startswith(SKIP_PREFIX) or s in ("{", "}", "};"):
                 buf = []
+                index += 1
+                continue
+
+            # 数据类型文件里的记录声明不是组件：连同记录体里的方法一起跳过。
+            # 一行到底（`...);` 或 `... { }`）直接跳过；带多行记录体的按花括号配平。
+            #
+            # 注意 depth 的起点取自**记录声明这一行**：`record 数据帧(帧头 头)` 本身
+            # 没有花括号，于是先向后找到第一个含 `{` 的行（记录体的开括号），再从那里
+            # 开始配平。跳过结束后 index=j+1 —— 记录体的闭括号也被吃掉，记录体里的
+            # 方法不会进入下面的声明识别。
+            if RECORD_DECL_RE.match(s):
+                buf = []
+                j = index
+                depth = raw.count("{") - raw.count("}")
+                if "{" not in raw and not s.endswith(";"):
+                    k = j + 1
+                    while k < len(lines) and "{" not in lines[k]:
+                        k += 1
+                    if k < len(lines):
+                        j = k
+                        depth = lines[k].count("{") - lines[k].count("}")
+                if depth > 0:
+                    k = j + 1
+                    while k < len(lines) and depth > 0:
+                        depth += lines[k].count("{") - lines[k].count("}")
+                        k += 1
+                    j = k - 1
+                index = j + 1
                 continue
 
             meta, dev = _read_meta(buf)
@@ -150,6 +217,7 @@ def parse_cs_project(paths, root=None):
             # 的纯文档性标注不会产出信号节点。
             if mf and meta.get("dir"):
                 raw_signals.append((rel, lineno, meta["dir"], mf.group("ctype"), mf.group("name"), meta))
+                index += 1
                 continue
 
             mfn = CS_FUNC_RE.match(s)
@@ -163,6 +231,8 @@ def parse_cs_project(paths, root=None):
                     "meta": meta,
                     "device": dev,
                 }
+
+            index += 1
 
     for rel, lineno, direction, ctype, name, meta in raw_signals:
         cpath = _container_path(meta, rel)

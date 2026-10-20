@@ -11,19 +11,24 @@
 
 ---
 
-## 依赖：零运行时依赖，零 devDependency
+## 依赖：零运行时依赖；devDependency 只服务类型检查与 IDE
 
 ```json
 "dependencies": {},
-"devDependencies": {}
+"devDependencies": {
+  "@types/node": "^22",
+  "typescript": "^5.9.3"
+}
 ```
 
-**这个决定是刻意的，请勿轻易改动。**
+**运行时零依赖这个决定是刻意的，请勿轻易改动。** `devDependencies` 里的两项只在
+`npm install` 后供 `npm run typecheck` 与编辑器补全使用；**`npm test` 不加载它们**
+（Node ≥ 22.6 原生擦除类型，测试直接跑 `.ts`），所以离线克隆后不装依赖也能跑测试。
 
 | 候选依赖 | 为什么不用 |
 | :--- | :--- |
 | `@xmldom/xmldom` | drawio 文档结构简单（无命名空间、无 DTD、无混合内容）。`src/xml.ts` 手写 200 行就够，而且能精确对齐 `xml.etree.ElementTree` 的空元素拼写、属性转义、`text`/`tail` 归属 —— 引库反而要去适配它的怪癖 |
-| `typescript`（作为 devDependency） | Node ≥ 22.6 **原生擦除类型**直接运行 `.ts`，`npm test` 不需要编译。`tsconfig.json` 仍然提供，供 IDE 与可选的 `npm run typecheck` 使用 |
+| `typescript`（运行时） | Node ≥ 22.6 **原生擦除类型**直接运行 `.ts`，`npm test` 不需要编译。`tsconfig.json` 仍然提供，供 IDE 与可选的 `npm run typecheck` 使用 |
 | 任何 XSD 库 | `src/xsd.ts` 是覆盖 `mxfile.xsd` 所用构造的子集校验器，已与 lxml 交叉验证（见下） |
 | 测试框架 | `node --test` 内置 |
 
@@ -31,8 +36,8 @@
 TS 版不会被 V8 之外的第三方解析器开销干扰；反过来说，如果 TS 版用了
 `@xmldom` 而 Python 版用标准库，基准比的就不再是算法本身。
 
-> 唯一需要网络的场景：想跑 `npm run typecheck` 时要自行准备 `typescript` 与
-> `@types/node`。**测试不依赖它们。**
+> 唯一需要网络的场景：想跑 `npm run typecheck` 时先 `npm install` 拉取
+> `typescript` 与 `@types/node`。**测试不依赖它们。**
 
 ---
 
@@ -41,7 +46,7 @@ TS 版不会被 V8 之外的第三方解析器开销干扰；反过来说，如�
 ```bash
 cd typescript
 
-npm test                     # 105 个测试，0 依赖，0 skip
+npm test                     # 175 个测试，0 依赖，0 skip（报表显示 176，多出的 1 项是 test/helpers.ts 文件条目）
 
 node bin/drawcode.ts build ../../tests/golden/small-c/input/adc.h \
                           ../../tests/golden/small-c/input/adc.c \
@@ -58,7 +63,8 @@ node bin/drawcode.ts build ../../tests/golden/small-c/input/adc.h \
 ## CLI
 
 ```
-drawcode build <files...> [--root DIR] [--out FILE] [--layout-from FILE] [--svg FILE]
+drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--inline] [--cards]
+                           [--no-rw-labels] [--straight-edges] [--layout-from FILE] [--svg FILE]
 drawcode sync <FILE.drawio> <files...> [--root DIR] [--write]
 ```
 
@@ -66,19 +72,53 @@ drawcode sync <FILE.drawio> <files...> [--root DIR] [--write]
 | :--- | :--- |
 | `build` | 源码 → `.drawio`；`--svg` 同时出一份同坐标的只读预览 |
 | `build --layout-from X.drawio` | 复用已有图里的人工排版，再按当前代码重建（幂等） |
+| `build --merge` | 多个模块合成**一张**图（默认每个模块各出一张） |
+| `build --inline` | 折叠「一写一读」的信号：两端设备直连，中间的信号节点不画 |
+| `build --cards` | 带 `Asset` 的函数渲染成图片卡片（设备总览图用） |
+| `build --no-rw-labels` | 边上的 `read` / `write` 字去掉，只留线 |
+| `build --straight-edges` | 每条边画成**直线**，不跑避障正交布线（见下） |
 | `sync` | `.drawio` → 源码，**只回写声明层**；不带 `--write` 是 dry-run |
 
 `sync` 永不改写函数体逻辑 —— 这是设计约束，不是未实现。
+
+`--inline` 与 `--layout-from` 同时用时，先折叠再套排版（折叠改的是图的内容，
+少掉的节点必须由重新布局补位，不是在原位留个洞）。`--cards` 只对 C# 前端的
+`[Device(Asset = "…")]` / `[Drawcode(Asset = "…")]` 有效，C 侧没有对应键。
+
+### `--straight-edges`：为什么不能直接改默认值
+
+默认仍是正交布线（`EDGE_STYLE` 里的 `edgeStyle=orthogonalEdgeStyle;rounded=1;jumpStyle=arc;…`），
+开关打开才换成 `edgeStyle=none;html=1;`。**不能直接改默认值**，两个理由：
+
+1. 金样 `tests/golden/*/expected.drawio` 里写死了 `orthogonalEdgeStyle` 与 `<Array as="points">`，
+   改默认它们立刻全红；
+2. 那两份金样是 TS / Python / .NET **共享的契约** —— 只动 TS 的默认值，等于单方面撕毁它。
+
+换样式时四件事必须一起做，漏一件线还是弯的：清掉 `edgeStyle=orthogonalEdgeStyle`
+（不清，draw.io 会**自己**再算一遍正交走线）、去掉 `rounded=1`（没有拐角，圆角无从谈起）、
+去掉 `jumpStyle=arc` / `jumpSize=6`（跨线跳弧只在布线器算拐点时才产生）、
+**保留 `exitX/exitY/entryX/entryY` 锚点**（它决定线从节点哪条边出发，与走法无关；
+丢了它 draw.io 会自己就近挑边，「左右相连」可能变成从上下出线）。
+
+自动算出的拐点会被丢掉，但 `--layout-from` 里**人工画上的**拐点照样保留 ——
+那是人明确放上去的东西，不该被一个样式开关悄悄吞掉。
+
+**什么时候不该开**：正交路由在「横向分区带 + 节点成行排列」的布局下是**贴合**的；
+换成直线，跨带的连线全部化成对角线，会形成一片斜线交叉网，还可能斜穿卡片图片和标签框。
+设备级总览图（分区带 + 卡片）属于后一类，实测更难看。**要不要开取决于图的拓扑，不取决于偏好。**
 
 ---
 
 ## 测试
 
 ```bash
-npm test                      # 全部 105 个
-npm run test:conformance      # 只跑 L1–L4 金标准（16 个）
-npm run test:unit             # 其余单元测试
+npm test                      # 全部 175 个（报表 176，含 helpers.ts 条目）
+npm run test:conformance      # 只跑 L1–L4 金标准（18 个）
+npm run test:unit             # 其余单元测试（157 个）
 ```
+
+裸 `node --test` 按 `**/test/**/*.ts` 发现文件，会把不含测试的 `test/helpers.ts`
+也算成一个顶层条目 —— 所以报表上的总数比真实测试数**多 1**。上面写的是真实数。
 
 ### 一致性结果（`../tests/golden/` 两个案例）
 
@@ -141,7 +181,7 @@ typescript/
 │   ├── regex.ts / order.ts / num.ts   Python re / sorted / repr 的语义桥
 │   ├── fsutil.ts / html.ts       行切分、路径、HTML 转义
 │   └── index.ts                  公共 API
-├── test/                         105 个测试
+├── test/                         175 个测试
 │   └── fixtures/                 Python 生成的压缩 fixture
 └── tools/make-fixtures.py        生成上面那些 fixture
 ```
@@ -156,10 +196,15 @@ typescript/
 | :--- | :--- | :--- |
 | 1 | **XSD 校验器是手写子集**，Python 版用 lxml | 本 XSD 覆盖的构造全部支持；不在本 XSD 里的 XSD 特性（命名空间、`xs:import`、`xs:extension`、identity constraints）不支持。**不改判定结果**：9 个变异与 lxml 判断一致 |
 | 2 | **浮点打印**在指数区间依赖 `toExponential()` | 实际坐标只可能是整数或 `x.5`，两条路径一致；`num.test.ts` 单独覆盖了 `1e-5` / `1e21` 等边界 |
-| 3 | **`\w` 只匹配 ASCII**（JS 语义），Python 是 Unicode 感知 | 本项目的标识符全是 ASCII，无影响。**若将来支持 Unicode 标识符会分叉** —— 届时两边都要显式写 `[\p{L}\p{N}_]` |
+| 3 | **C# 的 Unicode 名字是 TS 独有**：`csparse.ts` 的类型与名字位置都显式写 `[\p{L}]`，并整段跳过 `record` 声明；Python `csparse.py` 与 .NET `CsParse.cs` 的 C# 前端仍只认 ASCII | ASCII 源码三版结果一致；用中文信号名/组件方法名的源码目前只有 TS 能正确出图，另两版会**静默丢节点**。要三版对齐，需把同样的 IDENT 与 record 跳过逻辑移植过去 |
 | 4 | **`String.replace` 只替换第一处** | 仅影响测试代码写法（用 `replaceAll`）；生产代码没有依赖"全替换"的地方 |
 | 5 | **CLI 参数解析**用 `node:util.parseArgs` | 覆盖 `build` / `sync` 的全部选项；差异在帮助文本措辞。退出码约定一致（成功 0、用法错误 2） |
 | 6 | **`str.splitlines()` / 排序 / `repr`** 均为手写等价物 | 已在 `fsutil.ts` / `order.ts` / `num.ts` 中逐条对齐并测试 |
+| 7 | **边标签去叠印是 TS 独有** | 两条边的标签会撞在一起时，TS 把文字挪进 `eN_label` 子单元格；另外两版把标签全留在边上，同样的输入会叠字。金标准里没有一对撞上的标签，所以这条不会被一致性测试照出来 |
+| 8 | **C# 前端的 `Xy` / `Size` / `Style` 与 `[Callout]` 是 TS 独有** | 设备总览图需要钉死坐标与自由文本框。Python 的 `csparse.py` 与 .NET 的 `CsParse.cs` 都不认这些键，且都是**忽略未知属性**而非报错 —— 喂给它们只会得到一张少了说明框、且没有报错的图 |
+
+第 7、8 条另见 `../docs/conformance.md` 的 Known divergence。第 8 条要改实现才算消除：
+`META_KEY` / `AttrKey` 里补键、两边都加 `CalloutAttribute` 解析。
 
 ---
 

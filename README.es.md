@@ -7,7 +7,7 @@
 > TypeScript, .NET 10.
 
 Funciona en Windows, Linux y macOS. Sin dependencias de ejecución de terceros en ninguna implementación: Python 
-3.10+, Node 18+ o .NET 10 (elige una).
+3.10+, Node 22.6+ o .NET 10 (elige una).
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -116,7 +116,7 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ## Desarrollo
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 71 tests
+cd python && python -m unittest discover -s tests -t .    # 124 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -132,7 +132,7 @@ misma columna.
 
 | Afirmación | Cómo se midió | Resultado |
 | :--- | :--- | :--- |
-| La implementación de Python es correcta | `python -m unittest discover -s tests -t .` | **71 tests, 0 failures, 0 skipped** |
+| La implementación de Python es correcta | `python -m unittest discover -s tests -t .` | **124 tests, 0 failures, 0 skipped** |
 | El `.drawio` comprimido se lee correctamente | Releer un fichero dorado comprimido con draw.io | **nodes=6, edges=6, attrs=6** — idéntico a la forma plana |
 | Una carga ilegible no falla en silencio | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | lanza `ValueError` |
 | El `.drawio` generado es válido según el esquema | XMLSchema de `lxml` contra `tools/xsd/mxfile.xsd` | **3/3 pasan** (C, C# y un diagrama con puntos intermedios) |

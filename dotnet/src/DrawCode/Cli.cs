@@ -25,6 +25,19 @@ internal static class Cli
               parsed IR as canonical JSON, for L1 conformance comparison
         """;
 
+    /// <summary>
+    /// 只表示「出现/不出现」的开关。它们绝不能消费下一个 token：
+    /// `build --merge a.c` 里的 a.c 是输入文件，不是 --merge 的值。
+    /// 早先这里没有白名单，所有 --flag 都按「可能带值」处理，于是布尔开关会吞掉
+    /// 紧跟其后的文件名 —— 文件不入图，也不报错。
+    /// 与 TS 的 parseArgs boolean、Python 的 argparse store_true 对齐。
+    /// </summary>
+    private static readonly HashSet<string> BooleanFlags = new(StringComparer.Ordinal)
+    {
+        "--merge",
+        "--write",
+    };
+
     internal static int Run(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help")
@@ -46,7 +59,9 @@ internal static class Cli
                 {
                     options[a[..eq]] = a[(eq + 1)..];
                 }
-                else if (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                else if (!BooleanFlags.Contains(a)
+                         && i + 1 < args.Length
+                         && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
                 {
                     options[a] = args[++i];
                 }

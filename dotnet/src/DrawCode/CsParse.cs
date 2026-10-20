@@ -46,6 +46,9 @@ internal static class CsParse
         ["Tooltip"] = "tooltip",
         ["External"] = "external",
         ["Asset"] = "asset",
+        // Path 是共享特性：Python 的解析器保留全部命名参数，所以一直支持；
+        // TS/.NET 早先漏了这条白名单，导致同一份源码在两者里静默回退到文件 stem。
+        ["Path"] = "path",
         ["Vendor"] = "vendor",
         ["Model"] = "model",
         ["Spec"] = "spec",
@@ -57,14 +60,47 @@ internal static class CsParse
     private static readonly Regex DirectionArgRe = new(@"Direction\s*\.\s*(\w+)", RegexOptions.Compiled);
     private static readonly Regex NamedArgRe = new(@"(\w+)\s*=\s*(?:""([^""]*)""|(true|false))", RegexOptions.Compiled);
 
+    /// <summary>
+    /// C# 类型片段与名字的字符集：首字符是任意 Unicode 字母或下划线，后续是字母、数字、
+    /// 下划线与类型语法里常见的 <c>. &lt; &gt; , [ ] ?</c>。
+    ///
+    /// 为什么不能用 <c>[A-Za-z_]</c>：本项目的部分关系字段类型是中文结构体
+    /// （<c>数据包</c>），ASCII 正则会让整条声明**静默地**不被当成信号 ——
+    /// 图上少一个节点，而且不报任何错。名字位置与类型位置必须是同一字符集：
+    /// C# 编译器接受中文标识符，解析器没有理由只认 ASCII。
+    ///
+    /// 放宽名字后，原本靠「ASCII 看不见」挡在图外的两类声明必须显式处理：
+    /// <list type="bullet">
+    /// <item><c>record</c> 类型声明与记录体里的方法 → 由 <see cref="RecordDeclRe"/> 整段跳过；</item>
+    /// <item>泛型桩方法（<c>产出&lt;T&gt;()</c>）→ 名字后跟 <c>&lt;</c> 而不是 <c>(</c>，天然不匹配。</item>
+    /// </list>
+    /// </summary>
+    private const string Ident = @"[\p{L}_][\p{L}\p{N}_]*";
+    private const string TypePattern = @"[\p{L}_][\p{L}\p{N}_\.<>,\[\]\?]*";
+
     internal static readonly Regex FieldRe = new(
-        @"^\s*(?:(?:" + Modifiers + @")\s+)*(?<ctype>[A-Za-z_][\w\.<>,\[\]\?]*)\s+" +
-        @"(?<name>[A-Za-z_]\w*)\s*(?:=[^;]*)?;\s*$",
+        @"^\s*(?:(?:" + Modifiers + @")\s+)*(?<ctype>" + TypePattern + @")\s+" +
+        @"(?<name>" + Ident + @")\s*(?:=[^;]*)?;\s*$",
         RegexOptions.Compiled);
 
     internal static readonly Regex CsFuncRe = new(
-        @"^\s*(?:(?:" + Modifiers + @")\s+)*(?<ret>[A-Za-z_][\w\.<>,\[\]\?]*)\s+" +
-        @"(?<name>[A-Za-z_]\w*)\s*\((?<params>[^)]*)\)\s*\{?\s*$",
+        @"^\s*(?:(?:" + Modifiers + @")\s+)*(?<ret>" + TypePattern + @")\s+" +
+        @"(?<name>" + Ident + @")\s*\((?<params>[^)]*)\)\s*\{?\s*$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>record</c> 声明的开头。解析时必须**整段跳过**（与 TS/Python 同义）。
+    ///
+    /// 名字位置放开到 Unicode 之后，<c>public sealed record 采样帧(...)</c> 与普通
+    /// 方法签名完全同形；记录体里的 <c>public 帧头 下一帧()</c> 也会变成组件函数。
+    /// 数据类型文件（<c>示例数据结构.cs</c>）不是被测模型，整段跳过记录声明是唯一
+    /// 不误伤设备类里真实方法的办法 —— 设备类用 <c>class</c>，不在这个正则里。
+    ///
+    /// 只跳过 <c>record</c>，不跳过 <c>class</c>：模型源文件本身就是
+    /// <c>public static class 设备名</c>，连类一起跳会把整张图清空。
+    /// </summary>
+    private static readonly Regex RecordDeclRe = new(
+        @"^\s*(?:(?:public|private|internal|protected|static|sealed|abstract|readonly|partial|unsafe|new)\s+)*record\b",
         RegexOptions.Compiled);
 
     private static readonly string[] SkipPrefix = ["using ", "namespace ", "#"];
@@ -199,6 +235,48 @@ internal static class CsParse
                 if (SkipPrefix.Any(p => s.StartsWith(p, StringComparison.Ordinal)) || s is "{" or "}" or "};")
                 {
                     buf.Clear();
+                    continue;
+                }
+
+                // 数据类型文件里的记录声明不是组件：连同记录体里的方法一起跳过。
+                // 一行到底（`...);` 或 `... { }`）直接跳过；带多行记录体的按花括号配平。
+                //
+                // depth 的起点取自**记录声明这一行**：`record 数据帧(帧头 头)` 本身
+                // 没有花括号，于是先向后找到第一个含 `{` 的行（记录体的开括号），再从
+                // 那里开始配平。for 循环继续时会 idx++，等价于 TS/Python 的 index=j+1。
+                if (RecordDeclRe.IsMatch(s))
+                {
+                    buf.Clear();
+                    var j = idx;
+                    var depth = CParse.CountChar(raw, '{') - CParse.CountChar(raw, '}');
+                    if (!raw.Contains('{') && !s.EndsWith(';'))
+                    {
+                        var k = j + 1;
+                        while (k < lines.Length && !lines[k].Contains('{'))
+                        {
+                            k++;
+                        }
+
+                        if (k < lines.Length)
+                        {
+                            j = k;
+                            depth = CParse.CountChar(lines[k], '{') - CParse.CountChar(lines[k], '}');
+                        }
+                    }
+
+                    if (depth > 0)
+                    {
+                        var k = j + 1;
+                        while (k < lines.Length && depth > 0)
+                        {
+                            depth += CParse.CountChar(lines[k], '{') - CParse.CountChar(lines[k], '}');
+                            k++;
+                        }
+
+                        j = k - 1;
+                    }
+
+                    idx = j;
                     continue;
                 }
 

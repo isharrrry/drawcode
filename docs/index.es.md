@@ -12,7 +12,7 @@ las otras dos son traducciones fieles, no resúmenes. Las tres se actualizan en 
 | Tema | Versiones de idioma | Qué cubre |
 | :--- | :--- | :--- |
 | **Arquitectura** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | Las capas, qué posee cada módulo, los dos flujos de datos (build y sync) y el razonamiento tras negarse a persistir una representación intermedia |
-| **Anotaciones** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Referencia a nivel de campo de cada clave de anotación: comentarios `@drawcode` y `@device` (C), atributos `[Drawcode]` y `[Device]` (C#) — con tipos, valores por defecto y ejemplos |
+| **Anotaciones** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Referencia a nivel de campo de cada clave de anotación: comentarios `@drawcode` y `@device` (C), atributos `[Drawcode]`, `[Device]` y `[Callout]` (C#) — con tipos, valores por defecto y ejemplos |
 | **Formato `.drawio`** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Mapeo de elementos, semántica de coordenadas, reglas de anclas y enrutado, y la forma de almacenamiento comprimido de draw.io |
 | **Benchmark** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | Rendimiento medido en las tres implementaciones, con las cifras brutas y adónde va realmente el tiempo |
 | **Implementaciones** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | Cómo compilar, probar e invocar cada una de las versiones Python, TypeScript y .NET |

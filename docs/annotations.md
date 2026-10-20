@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Annotations
-description: Field-level reference for every annotation key — the C @drawcode and @device comment blocks, and the C# Drawcode and Device attributes
+description: Field-level reference for every annotation key — the C @drawcode and @device comment blocks, and the C# Drawcode, Device and Callout attributes
 tags: [annotations, parsing, attributes, comments, reference]
 status: stable
 ---
@@ -47,7 +47,7 @@ The declaration is recognised by a line-oriented regular expression, one declara
 - **One declaration per line, terminated by `;`.** The trailing semicolon is part of the match; a declaration split across lines is not recognised.
 - **The declaration must carry `@drawcode`.** A comment block with no annotation, or an annotation on a construct that is not a top-level variable, produces no signal at all.
 - **Array declarators are folded into the type.** `float g_coeff[32];` yields `name = g_coeff` and `ctype = float[32]`; the suffix is reattached to the type, so the label reads `float[32] / in / coeff`.
-- **Signals accept `dir`, `unit`, `alias`, `note` and `external`.** The geometry keys belong to functions — see the key tables below.
+- **Signals accept every key in the signal table below, geometry included.** `xy`, `size` and `style` are read on a variable exactly as they are on a function — but only by the TypeScript front ends, so read [Where the geometry keys actually take effect](#where-the-geometry-keys-actually-take-effect) before relying on them.
 
 ## Direction in C#: the `[Drawcode]` attribute
 
@@ -65,7 +65,7 @@ public static short g_raw;
 | `[Drawcode(Direction.Io)]` | `inout` |
 | `[Drawcode]` / `[Drawcode(Direction.None)]` | `""` |
 
-The attribute binds to the **next field, property or method declaration** that follows it, ignoring blank lines, `using`, `namespace`, `#`-prefixed lines and bare braces. The positional argument may be omitted (`[Drawcode(Alias = "…")]`), in which case the member is documented but carries no direction. `DrawcodeAttribute`, `DeviceAttribute` and `Direction` must exist in your project — copy [`examples/small/cs/DrawcodeAttributes.cs`](../examples/small/cs/DrawcodeAttributes.cs) once.
+The attribute binds to the **next field, property or method declaration** that follows it, ignoring blank lines, `using`, `namespace`, `#`-prefixed lines and bare braces. The positional argument may be omitted (`[Drawcode(Alias = "…")]`), in which case the member is documented but carries no direction. `DrawcodeAttribute`, `DeviceAttribute`, `CalloutAttribute` and `Direction` must exist in your project — copy [`examples/small/cs/DrawcodeAttributes.cs`](../examples/small/cs/DrawcodeAttributes.cs) once.
 
 ## Annotation syntax
 
@@ -100,7 +100,7 @@ In C, consecutive `///` lines accumulate and are **flushed** when a non-`///`, n
 Key/value pairs in C are read by `(\w+)\s*=\s*"([^"]*)"`: **keys are bare words, values are double-quoted, and a value may not contain a double quote.** In C# the keys are named attribute properties. Unknown keys are silently ignored rather than raising, which keeps annotations forward-compatible across implementations.
 ## Key reference: signals
 
-Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-attributed fields and properties in C#. All five keys behave identically in both languages; `dir` is documented above.
+Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-attributed fields and properties in C#. The first five keys behave identically in both languages and in every implementation; the last three are geometry, and **TypeScript is the only implementation that reads them**. `dir` is documented above.
 
 | Key | Type | Default | Effect | Example |
 | :--- | :--- | :--- | :--- | :--- |
@@ -108,6 +108,9 @@ Applies to `@drawcode`-annotated top-level variables in C and to `[Drawcode]`-at
 | `alias` | string | `""` | Human name used as a **custom attribute** on the node (not in the label). The label always shows the C identifier. | `alias="原始采样值"` |
 | `note` | string | `""` | Free-text remark, written to the `<object>` custom attributes. Not rendered in the label. | `note="上电后需校准"` |
 | `external` | `"true"` / absent | `false` | Marks the signal as coming from outside the module set. Parsed as the string `"true"`; any other value, including `"True"`, leaves it `false`. | `external="true"` |
+| `xy` | `"x,y"` | unset | Absolute canvas coordinates, overriding the default stacking for this node. **TypeScript only** (see below). | `xy="420,160"` |
+| `size` | `"WxH"` | `160x60` on a signal, `180x72` on a function | Initial node size; separator is a lowercase `x`. **TypeScript only.** | `size="180x72"` |
+| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string (role colouring and the like). **TypeScript only.** An empty value leaves the output byte-identical. | `style=";fillColor=#e8f0fe"` |
 
 The label is assembled as `name` on the first line and `ctype / dir / unit` on the second, skipping empty parts — so a signal with no `unit` reads `int16_t / in`, not `int16_t / in / `.
 
@@ -120,12 +123,43 @@ Applies to function declarations in C and to methods in C#.
 | `alias` | string | `""` | Used as the node's **title line** in place of the function name (`ADC 采样()` instead of `adc_read()`). The real name still appears on the second line. | `alias="ADC 采样"` |
 | `note` | string | `""` | Free-text remark, written to the `<object>` custom attributes. | `note="上电后需先校准"` |
 | `tooltip` | string | `""` | Hover text, written to the `<object>` custom attributes. | `tooltip="上电后需先校准"` |
-| `asset` | string | `""` | Path to an image for the node, written to the `<object>` custom attributes. **The path is recorded, not resolved** — no file is read, and a missing target is not an error. | `asset="assets/ads1115.svg"` |
+| `asset` | string | `""` | Path to an image for the node, written to the `<object>` custom attributes. **The path is recorded, not resolved** — no file is read, and a missing target is not an error. With `--cards` it becomes the picture on the card (see [Image cards](#image-cards---cards)). | `asset="assets/ads1115.svg"` |
 | `external` | `"true"` / absent | `false` | Switches the node style to the dashed external form. | `external="true"` |
 | `xy` | `"x,y"` | unset | Initial node position on the canvas, in absolute canvas coordinates. Overrides the default stacking for this node. | `xy="420,160"` |
 | `size` | `"WxH"` | `180x72` | Initial node size. The separator is a lowercase `x`; the value is lowercased before splitting, so `180X72` also works. | `size="180x72"` |
+| `style` | string | `""` | Fragment appended verbatim to the end of the node's style string. **TypeScript only**, same as the signal row. | `style=";fillColor=#dae8fc"` |
 
-**Node geometry is C-only: both `xy` and node `size` are read on one side only.** `csparse.py` never calls `meta.get("xy")` or `meta.get("size")`, so a C# method is always placed and sized by the default algorithm. Do not confuse this with the `size` key on `@device` / `[Device]`, which is the physical package size of a part and **is** read on both sides — they are different keys that happen to share a name. This is a real asymmetry between the two front ends, not an oversight in this document.
+Do not mix the separators up: `xy` takes a comma, `size` takes a **lowercase `x`**. Writing the
+wrong one does **not** raise — it yields a node with `NaN` size, positioned at `(NaN, NaN)` and
+sized `(NaN, NaN)`, which is invisible in draw.io.
+
+### Where the geometry keys actually take effect
+
+The three keys work the same way in **both** languages and on **both** entity kinds — it is the
+*implementation* that decides whether they are read at all. That distinction is the whole story, and
+this section used to get it wrong in two different directions, so here is the table and nothing
+shorter:
+
+| | TypeScript (`cparse.ts` / `csparse.ts`) | Reference implementation (`cparse.py` / `csparse.py` / `CsParse.cs`) |
+| :--- | :--- | :--- |
+| `xy` / `size` on a **function** | read, honoured | C: read, honoured. **C#: not read at all** |
+| `xy` / `size` on a **signal** | read, honoured | **not read at all** — `cparse.py` reads the pair inside its function branch only |
+| `style`, any entity | read, appended to the node style | **not read at all** |
+| written back by `sync` | yes, for entities whose geometry the diagram changed — see [Write-back](#write-back) | **nothing** |
+
+The second row is the one that bites. `cparse.py` reads `xy` **after** its signal loop, in the
+function branch, so `/// @drawcode xy="420,160"` on a variable is parsed and then dropped; the signal
+goes back to being stacked by the default algorithm. `csparse.py` says outright in its own header
+that its `[Drawcode]` has no `Size` property and that it never calls `meta.get("xy")`, so every method
+*it* parses is placed by the default algorithm too.
+
+**Every implementation ignores unknown keys rather than raising**, so none of this announces itself:
+you switch implementation and the diagram changes shape with no error, and the IR is identical
+either way — L1 in `conformance.md` deliberately excludes `x`/`y`/`w`/`h`, so no golden case can catch
+it. See Known divergence in `conformance.md` before assuming two implementations agree on a source
+that carries geometry.
+
+Do not confuse these with the `size` key on `@device` / `[Device]`, which is the physical package size of a part and **is** read on both sides — they are different keys that happen to share a name.
 
 ## Key reference: devices
 
@@ -152,6 +186,69 @@ Applies to function declarations in C and to methods in C#.
 | Wrong value causes | a crash on `float()` — this is the one place a malformed annotation is fatal | nothing; any string is accepted |
 
 Because both are written with the same `k="v"` syntax and both appear in the same comment block, this is the most common annotation mistake. The distinction is which tag the key sits under.
+
+## Free text blocks: `[Callout]`
+
+A box you can put words in. It fills the gap left by the key system: annotation keys decorate
+elements that already exist, but they cannot add anything new — so there was nowhere to write a
+section heading, a legend, or a note saying what the diagram deliberately leaves out.
+
+```csharp
+[Callout("Platform interior — device and relation groups live on this side",
+         Xy = "40,40", Size = "260x60", Style = "band")]
+[Callout("IO closed loop: parameters ⇄ commands", Xy = "40,120", Size = "240x40", Style = "box", Font = 13)]
+```
+
+| Argument | Value | Notes |
+| :--- | :--- | :--- |
+| first positional | double-quoted string | **must come first**, and may not contain a double quote. May contain `<br>` for a line break |
+| `Xy` | `"x,y"` | **absolute** canvas coordinates, written exactly like node geometry |
+| `Size` | `"WxH"` | lowercase `x` separator. Defaults to `240x40` |
+| `Style` | `text` / `box` / `band` | borderless text / tinted callout box / wide section band. An unrecognised value falls back to `text` |
+| `Font` | number | font size. `0` or absent uses the default for the kind (`text`/`box` 12, `band` 15) |
+
+**It does not attach to the entity it is written above.** The `[Callout]` line sits on some method or
+field only so that it lives in the same file as the diagram — its position comes entirely from `Xy`,
+independently of where its host ends up. One declaration may carry **several** `[Callout]` lines
+(they are a list, not a dictionary, so they do not overwrite one another).
+
+Note that `Style` means "kind of text block" here and "fragment appended to the node style" on
+`[Drawcode]` — **same name, different meaning**. The two are parsed into separate key namespaces so
+that writing both on one declaration cannot make them collide.
+
+Three things surprise people:
+
+1. **`band` has to be drawn before the containers.** A cell is drawn together with its whole subtree,
+   and a band is a direct child of the root; emitted after the containers it lands *on top of* that
+   subtree and covers every card inside them. The generator therefore emits `band` **before** the
+   containers and `text`/`box` after the cards — you do not have to manage this, but you do need to
+   know it if you change the emit order.
+2. **Dragging a text block does not round-trip.** `applyLayout` only resolves node and function ids
+   and skips anything else. Move the block in draw.io, rebuild with `--layout-from`, and it **snaps
+   back to the `Xy` in the source**. To move it, edit the source.
+3. **Only the TypeScript C# front end knows this attribute.** Neither `csparse.py` nor `CsParse.cs`
+   reads `CalloutAttribute`, and both ignore unknown attributes rather than raising — so running the
+   same source through another implementation drops the text blocks **entirely and silently**.
+
+## Image cards: `--cards`
+
+Give `Asset` on `@device` / `[Device]` a picture, pass `--cards`, and the function node becomes an
+image card: the picture fills the node box and the function name is pushed outside it, below the
+frame (there is no room left inside).
+
+```bash
+node bin/drawcode.ts build Drone.cs --cards --out devices.drawio --svg devices.svg
+```
+
+- Only takes effect when `--cards` is on **and** `asset` is non-empty; without the flag, `asset` is
+  just a record on the `<object>`.
+- `[Device(Asset = "…")]` is copied onto the function automatically (a function that sets its own
+  `asset` wins), so the picture only has to be declared once.
+- The path is relative to the **`.drawio` file itself** and drawcode never reads it — a missing
+  target is not an error, the card just renders blank.
+- **Offline renderers do not fetch external image files by default.** Converting such an SVG to PNG
+  without pointing the renderer at the image directory makes the photos vanish from the PNG while
+  the SVG still looks fine. That is a rendering-toolchain trap, not a flaw in the diagram.
 
 ## Where each key ends up
 
@@ -214,9 +311,34 @@ These rules need no annotation because they follow from the code's structure.
 | signal `dir` | the key `dir=in` / `dir=out` / `dir=io` (C), or the positional argument `Direction.X` (C#) |
 | function `alias` `note` `tooltip` `external` | `/// @drawcode …` (C) or `[Drawcode(…)]` (C#) |
 | device keys | `/// @device …` (C) or `[Device(…)]` (C#) |
+| `xy` / `size`, **only where the diagram disagrees with the source** | `xy="420,160" size="180x72"` (C) or `Xy = "420,160", Size = "180x72"` (C#) |
+| `style` | **never** — it is an input-only key, like `clientX` on an element |
 | function **body** | **never** — this is the design constraint, not a gap |
 
-Keys that `drawcode` does not manage — notably a hand-written `xy` or `size` on a function — are **preserved in place**, in their original order, when the annotation line is rewritten. Adding a note to an annotated function will not silently drop its coordinates.
+**TypeScript only.** Neither `cparse.py`/`codegen.py` nor the .NET side writes geometry back, so a
+diagram you rearrange round-trips through TypeScript and silently does not through the others.
+
+The geometry row is conditional, and the condition is what keeps `sync` honest. `applyLayout` is the
+one place that holds both numbers — what the diagram now says, and what `build` would have written
+(the source's own `xy`, or the default layout when there is none) — and it records only the entities
+where the two differ. **Those differences are the only geometry `sync` ever writes.** So an untouched
+project produces byte-identical files, and a node the source already pinned keeps its original value
+rather than being rewritten to the same number in a new spelling.
+
+Three consequences worth knowing before you hand someone a diagram to rearrange:
+
+- **The unit is the container, not the canvas.** `<mxGeometry>` stores coordinates relative to the
+  parent cell; the annotation stores **absolute** canvas coordinates. The conversion lives in
+  `drawio.ts` and `codegen.ts` — hand-editing either one alone means reproducing that arithmetic.
+- **Only a cell that came out of `build` can be pinned.** A shape drawn in draw.io carries no
+  `symbolId`, so `applyLayout` never sees it and no `pinned` entry is ever created for it — including
+  on later syncs, long after `adoptForeign` declared it in the source. Measured, not inferred: adopt
+  a signal at `(40,200)`, re-sync, then drag that same cell to `(500,700)` and re-sync again — the
+  annotation is still bare `/// @drawcode dir=in`, and the node goes back to the default stack on the
+  next `build`. **To pin a node you added in the diagram, build first, then drag the generated cell.**
+- **`style` is never written, so it is also never lost.** The C and C# merges are key-by-key rather
+  than line-by-line precisely so that keys drawncode does not manage survive in their original
+  position. Adding a note to an annotated function will not silently drop its colour fragment.
 
 ## Related
 

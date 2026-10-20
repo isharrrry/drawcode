@@ -24,7 +24,7 @@ drawcode build ...
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -t .     # 71 tests
+python -m unittest discover -s tests -t .     # 124 tests
 ```
 
 ## Layout

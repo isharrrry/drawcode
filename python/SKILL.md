@@ -167,7 +167,7 @@ Python 3 的 `re` 默认 `\w` 匹配 Unicode 单词字符。移植到 JS（不�
 
 ```bash
 cd python
-python -m unittest discover -s tests -t .          # 71 tests，0 skipped
+python -m unittest discover -s tests -t .          # 124 tests，0 skipped
 ```
 
 测试规模：C 解析 12、C# 解析 10、drawio 往返 15、代码回写 11+、XSD 校验 3、端到端幂等 4、SVG 6。

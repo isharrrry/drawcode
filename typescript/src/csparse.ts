@@ -3,7 +3,8 @@
  *
  * 注解语法是**真特性**（不是注释）：
  *
- *     [Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值")]
+ *     [Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Xy = "40,120", Size = "180x72")]
+ *     [Callout("这块写什么，可含<br>换行", Xy = "40,40", Size = "260x60", Style = "box")]
  *     [Device(Vendor = "TI", Model = "ADS1115", Spec = "16bit/860SPS")]
  *     public static short g_raw;
  *
@@ -12,14 +13,17 @@
  *   - 方向是**位置参数**（`Direction.In`）而不是 `dir=` 键 —— 位置参数能让编辑器补全 `Direction.`。
  *   - `Direction.None` 或缺省参数**不构成信号**（当作函数或纯文档）；而 C 侧无 `dir` 键时 IR 的
  *     `dir` 是**空串**。这个不对称必须原样保留，三版都如此。
- *   - **没有节点几何键**：`xy` 与节点 `size` 都只有 C 侧支持（`[Drawcode]` 里也没有 `Size`）。
- *     别与 `[Device]` 上的 `size` 混淆 —— 那是器件物理封装尺寸，是两侧都读的**另一个同名键**。
+ *   - 节点几何键 `Xy`/`Size`、样式追加键 `Style`：**C 侧一直有，C# 侧本文件是第一个支持的实现**
+ *     （Python 与 .NET 的 C# 前端尚未跟进，见 ../../docs/annotations.zh-CN.md 的说明）。
+ *     `Xy` 是 `"x,y"`，`Size` 是 `"宽x高"`，容差与 cparse.ts 逐字一致，否则同一份坐标在两个
+ *     前端会得到两种结果。别与 `[Device]` 上的 `size` 混淆 —— 那是器件物理封装尺寸，
+ *     是两侧都读的**另一个同名键**，各在自己的命名空间里。
  */
 
 import { containerPath, defUse, loadSources, parseParams, topGroup } from "./cparse.ts";
 import { abspath, countOccurrences, dirname } from "./fsutil.ts";
 import type { Func, Param } from "./model.ts";
-import { Model, makeDevice, makeFunc, makeSignal } from "./model.ts";
+import { Model, makeCallout, makeDevice, makeFunc, makeSignal } from "./model.ts";
 import { matchAt } from "./regex.ts";
 
 export const DIRS: Record<string, "in" | "out" | "inout"> = {
@@ -28,7 +32,7 @@ export const DIRS: Record<string, "in" | "out" | "inout"> = {
   Io: "inout",
 };
 
-const ATTR_RE = /\[\s*(Drawcode|Device)\s*\((.*)\)\s*\]/;
+const ATTR_RE = /\[\s*(Drawcode|Device|Callout)\s*\((.*)\)\s*\]/;
 const DIR_ARG_RE = /Direction\.(\w+)/;
 const ARG_RE = /(\w+)\s*=\s*(?:"([^"]*)"|(\w+))/g;
 
@@ -40,29 +44,136 @@ const META_KEY: Record<string, string> = {
   tooltip: "tooltip",
   external: "external",
   asset: "asset",
+  path: "path",
+  xy: "xy",
+  size: "size",
+  style: "style",
 };
 
-function parseAttrLine(line: string): [string, string][] {
-  const m = ATTR_RE.exec(line);
-  if (m === null) return [];
+/**
+ * `[Callout]` 的命名参数在 meta 里的键前缀。
+ *
+ * 刻意与 META_KEY 分开：`Style` 在 `[Drawcode]` 上是「追加到节点样式」，在 `[Callout]` 上是
+ * 「文字块种类」，同名不同义。混在一个命名空间里，`[Drawcode(Style=…)]` 与
+ * `[Callout(..., Style=…)]` 写在同一个声明上时必然互相踩。
+ *
+ * 分隔符与节点几何**同一套**：`Xy` 用逗号（`"40,40"`）、`Size` 用小写 `x`（`"260x60"`），
+ * 由下面 parseCallout 里那段 `v.split(",")` / `v.toLowerCase().split("x")` 决定。
+ * 两者写混不会报错，只会得到 NaN 尺寸的隐形文字块 —— 曾经本文件头部的示例自己就写错了。
+ */
+const CALLOUT_KEY: Record<string, string> = {
+  xy: "callout_xy",
+  size: "callout_size",
+  style: "callout_shape",
+  font: "callout_font",
+};
+
+const CALLOUT_SHAPES = new Set(["text", "box", "band"]);
+
+/** `[Callout("文本", 命名参数…)]`：文本必须是第一个位置参数，用双引号括起（内部不能有双引号）。 */
+const CALLOUT_TEXT_RE = /^"([^"]*)"\s*(?:,\s*(.*))?$/;
+
+/** 一条 `[Callout]` 解析出来的原始形态，还没挂到宿主实体上。 */
+export interface RawCallout {
+  text: string;
+  shape: "text" | "box" | "band";
+  fontSize: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function parseArgs(body: string): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   ARG_RE.lastIndex = 0;
   let a: RegExpExecArray | null;
-  while ((a = ARG_RE.exec(m[2] as string)) !== null) {
+  while ((a = ARG_RE.exec(body)) !== null) {
     out.push([(a[1] as string).toLowerCase(), (a[2] ?? a[3] ?? "") as string]);
   }
   return out;
 }
 
-/** 收集相邻特性行：`[Drawcode(...)]` 进 meta，`[Device(...)]` 进 dev，并返回方向。 */
-export function readMeta(buf: string[]): [Map<string, string>, Map<string, string>, string | null] {
+function parseAttrLine(line: string): [string, string][] {
+  const m = ATTR_RE.exec(line);
+  if (m === null) return [];
+  return parseArgs(m[2] as string);
+}
+
+/**
+ * `Xy = "x,y"` / `Size = "宽x高"`。
+ *
+ * 容差与 C 侧 cparse.ts 的写法**逐字对齐**（逗号分隔、小写 `x` 分隔、一律 `Number()` 且不校验），
+ * 两个前端对同一份坐标必须得出同一个数，否则「同一套源码在两个语言里排版不同」会变成
+ * 永远查不出来的怪事。非法输入得到 NaN，与 C 侧一样由下游自己承担。
+ */
+function applyGeometry(
+  ent: { x: number; y: number; w: number; h: number },
+  meta: Map<string, string>,
+): void {
+  const xy = meta.get("xy");
+  if (xy !== undefined && xy !== "") {
+    const parts = xy.split(",").map((v) => Number(v));
+    ent.x = parts[0] as number;
+    ent.y = parts[1] as number;
+  }
+  const size = meta.get("size");
+  if (size !== undefined && size !== "") {
+    const parts = size.toLowerCase().split("x").map((v) => Number(v));
+    ent.w = parts[0] as number;
+    ent.h = parts[1] as number;
+  }
+}
+
+function parseCallout(body: string): RawCallout {
+  const out: RawCallout = { text: "", shape: "text", fontSize: 0, x: 0, y: 0, w: 240, h: 40 };
+  const tm = CALLOUT_TEXT_RE.exec(body.trim());
+  const rest = tm === null ? body : (tm[2] ?? "");
+  if (tm !== null) out.text = tm[1] as string;
+  for (const [k, v] of parseArgs(rest)) {
+    if (CALLOUT_KEY[k] === undefined) continue;
+    if (k === "style") {
+      // 认不出的种类退回无边框文字，而不是把原始串当样式用 —— 后者会静默产出非法样式
+      out.shape = CALLOUT_SHAPES.has(v) ? (v as RawCallout["shape"]) : "text";
+    } else if (k === "font") {
+      out.fontSize = Number(v) || 0;
+    } else {
+      const parts = (k === "xy" ? v.split(",") : v.toLowerCase().split("x")).map((n) => Number(n));
+      if (k === "xy") {
+        out.x = parts[0] as number;
+        out.y = parts[1] as number;
+      } else {
+        out.w = parts[0] as number;
+        out.h = parts[1] as number;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 收集相邻特性行：`[Drawcode(...)]` 进 meta，`[Device(...)]` 进 dev，`[Callout(...)]` 进列表，
+ * 并返回方向。
+ *
+ * 返回**四元组**（老调用方解构前三位即可，追加第四位是源兼容的）。Callout 用列表而不是
+ * 塞进 meta：一个声明上挂两个文字块是正常需求，塞进 Map 会被后一条静默覆盖。
+ */
+export function readMeta(
+  buf: string[],
+): [Map<string, string>, Map<string, string>, string | null, RawCallout[]] {
   const meta = new Map<string, string>();
   const dev = new Map<string, string>();
+  const callouts: RawCallout[] = [];
   let dir: string | null = null;
   for (const raw of buf) {
     const m = ATTR_RE.exec(raw);
     if (m === null) continue;
-    const isDevice = m[1] === "Device";
+    const kind = m[1] as string;
+    if (kind === "Callout") {
+      callouts.push(parseCallout(m[2] as string));
+      continue;
+    }
+    const isDevice = kind === "Device";
     if (!isDevice) {
       const d = DIR_ARG_RE.exec(m[2] as string);
       if (d !== null) dir = d[1] as string;
@@ -72,21 +183,56 @@ export function readMeta(buf: string[]): [Map<string, string>, Map<string, strin
       else if (META_KEY[k] !== undefined) meta.set(META_KEY[k] as string, v);
     }
   }
-  return [meta, dev, dir];
+  return [meta, dev, dir, callouts];
 }
 
 const MODIFIERS =
   "public|private|internal|protected|static|readonly|const|volatile|" +
   "virtual|override|abstract|sealed|async|extern|unsafe|new|partial";
 
+/**
+ * C# 类型片段的字符集：首字符是任意 Unicode 字母或下划线，后续是字母、数字、下划线与
+ * 类型语法里常见的 `. < > , [ ] ?`。
+ *
+ * 为什么不能用 `[A-Za-z_]`／`\w`：本项目的关系字段类型是中文结构体（`数据包`），
+ * ASCII 正则会让整条声明**静默地**不被当成信号 —— 图上少一个节点，而且不报任何错。
+ * 这正是「中文类型名要单独修解析器」的原因：C# 编译器接受中文标识符，解析器却看不见。
+ *
+ * 名字位置与类型位置**同一字符集**：C# 编译器接受中文标识符，解析器没有理由只认 ASCII。
+ * 信号名、函数名都可能是中文 —— 图上要显示的就是「哪个模块、传了什么」。
+ *
+ * 放宽名字后，原本靠「ASCII 看不见」挡在图外的两类声明必须显式处理：
+ *   · `record` 类型声明与记录体里的方法 → 由 RECORD_DECL_RE 整段跳过；
+ *   · 支撑件里的泛型桩方法（`生成<T>()` / `处理<T>(T)`）→ 名字后跟 `<` 而不是 `(`，天然不匹配。
+ */
+const IDENT = "[\\p{L}_][\\p{L}\\p{N}_]*";
+const TYPE_RE = "[\\p{L}_][\\p{L}\\p{N}_\\.<>,\\[\\]\\?]*";
+
 export const FIELD_RE = new RegExp(
-  `^\\s*(?:(?:${MODIFIERS})\\s+)*(?<ctype>[A-Za-z_][\\w\\.<>,\\[\\]\\?]*)\\s+` +
-    `(?<name>[A-Za-z_]\\w*)\\s*(?:=[^;]*)?;\\s*$`,
+  `^\\s*(?:(?:${MODIFIERS})\\s+)*(?<ctype>${TYPE_RE})\\s+` +
+    `(?<name>${IDENT})\\s*(?:=[^;]*)?;\\s*$`,
+  "u",
 );
 
 export const CS_FUNC_RE = new RegExp(
-  `^\\s*(?:(?:${MODIFIERS})\\s+)*(?<ret>[A-Za-z_][\\w\\.<>,\\[\\]\\?]*)\\s+` +
-    `(?<name>[A-Za-z_]\\w*)\\s*\\((?<params>[^)]*)\\)\\s*\\{?\\s*$`,
+  `^\\s*(?:(?:${MODIFIERS})\\s+)*(?<ret>${TYPE_RE})\\s+` +
+    `(?<name>${IDENT})\\s*\\((?<params>[^)]*)\\)\\s*\\{?\\s*$`,
+  "u",
+);
+
+/**
+ * `record` 声明的开头。解析时必须**整段跳过**。
+ *
+ * 名字位置放开到 Unicode 之后，`public sealed record 采样帧(...)` 与普通方法签名
+ * 完全同形；记录体里的 `public 帧头 下一帧()` 也会变成组件函数。数据类型文件
+ * （`示例数据结构.cs`）不是被测模型，整段跳过记录声明是唯一不误伤设备类里真实方法的
+ * 办法 —— 设备类用 `class`，不在这个正则里。
+ *
+ * 只跳过 `record`，不跳过 `class`：模型源文件本身就是 `public static class 设备名`，
+ * 连类一起跳会把整张图清空。
+ */
+const RECORD_DECL_RE = new RegExp(
+  `^\\s*(?:(?:public|private|internal|protected|static|sealed|abstract|readonly|partial|unsafe|new)\\s+)*record\\b`,
 );
 
 const SKIP_PREFIX = ["using ", "namespace ", "#"];
@@ -129,6 +275,7 @@ interface CsFuncInfo {
   params: Param[];
   meta: Map<string, string>;
   device: Map<string, string>;
+  callouts: RawCallout[];
 }
 
 export function parseCsProject(paths: string[], root?: string): Model {
@@ -143,6 +290,7 @@ export function parseCsProject(paths: string[], root?: string): Model {
     ctype: string;
     name: string;
     meta: Map<string, string>;
+    callouts: RawCallout[];
   }
   const rawSignals: RawSignal[] = [];
   const rawFuncs = new Map<string, CsFuncInfo>();
@@ -167,7 +315,33 @@ export function parseCsProject(paths: string[], root?: string): Model {
         continue;
       }
 
-      const [meta, dev, dirArg] = readMeta(buf);
+      // 数据类型文件里的记录声明不是组件：连同记录体里的方法一起跳过。
+      // 一行到底（`...);` 或 `... { }`）直接跳过；带多行记录体的按花括号配平。
+      if (RECORD_DECL_RE.test(s)) {
+        buf = [];
+        let j = index;
+        let depth = countOccurrences(raw, "{") - countOccurrences(raw, "}");
+        if (!raw.includes("{") && !s.endsWith(";")) {
+          let k = j + 1;
+          while (k < lines.length && !(lines[k] as string).includes("{")) k++;
+          if (k < lines.length) {
+            j = k;
+            depth = countOccurrences(lines[k] as string, "{") - countOccurrences(lines[k] as string, "}");
+          }
+        }
+        if (depth > 0) {
+          let k = j + 1;
+          while (k < lines.length && depth > 0) {
+            depth += countOccurrences(lines[k] as string, "{") - countOccurrences(lines[k] as string, "}");
+            k++;
+          }
+          j = k - 1;
+        }
+        index = j;
+        continue;
+      }
+
+      const [meta, dev, dirArg, callouts] = readMeta(buf);
       buf = [];
 
       const mf = matchAt(FIELD_RE, s);
@@ -180,6 +354,7 @@ export function parseCsProject(paths: string[], root?: string): Model {
           ctype: mf.groups?.ctype as string,
           name: mf.groups?.name as string,
           meta,
+          callouts,
         });
         continue;
       }
@@ -194,29 +369,55 @@ export function parseCsProject(paths: string[], root?: string): Model {
           params: parseParams(mfn.groups?.params as string),
           meta,
           device: dev,
+          callouts,
         });
       }
     }
   }
 
+  /**
+   * 把一条声明上的文字块挂进模型。坐标为画布绝对坐标 —— 文字块不属于任何容器
+   * （见 model.ts 的 Callout 说明），所以这里不做任何容器偏移。
+   */
+  const attachCallouts = (owner: string, raws: RawCallout[]): void => {
+    raws.forEach((raw, i) => {
+      model.addCallout(
+        makeCallout({
+          id: `${owner}#callout${i + 1}`,
+          text: raw.text,
+          owner,
+          shape: raw.shape,
+          fontSize: raw.fontSize,
+          x: raw.x,
+          y: raw.y,
+          w: raw.w,
+          h: raw.h,
+        }),
+      );
+    });
+  };
+
   for (const rs of rawSignals) {
     const cpath = containerPath(rs.meta, rs.rel);
-    model.addSignal(
-      makeSignal({
-        id: `${rs.rel}::${rs.name}`,
-        name: rs.name,
-        ctype: rs.ctype,
-        dir: rs.dir,
-        file: rs.rel,
-        line: rs.line,
-        unit: rs.meta.get("unit") ?? "",
-        alias: rs.meta.get("alias") ?? "",
-        note: rs.meta.get("note") ?? "",
-        external: rs.meta.get("external") === "true",
-        group: topGroup(cpath),
-        path: cpath,
-      }),
-    );
+    const sid = `${rs.rel}::${rs.name}`;
+    const signal = makeSignal({
+      id: sid,
+      name: rs.name,
+      ctype: rs.ctype,
+      dir: rs.dir,
+      file: rs.rel,
+      line: rs.line,
+      unit: rs.meta.get("unit") ?? "",
+      alias: rs.meta.get("alias") ?? "",
+      note: rs.meta.get("note") ?? "",
+      external: rs.meta.get("external") === "true",
+      group: topGroup(cpath),
+      path: cpath,
+      style: rs.meta.get("style") ?? "",
+    });
+    applyGeometry(signal, rs.meta);
+    model.addSignal(signal);
+    attachCallouts(sid, rs.callouts);
   }
 
   const signalsByName = new Map<string, string>();
@@ -238,11 +439,14 @@ export function parseCsProject(paths: string[], root?: string): Model {
       note: info.meta.get("note") ?? "",
       tooltip: info.meta.get("tooltip") ?? "",
       asset: info.meta.get("asset") ?? "",
+      style: info.meta.get("style") ?? "",
       external: info.meta.get("external") === "true",
       group: topGroup(fpath),
       path: fpath,
     });
+    applyGeometry(func, info.meta);
     model.addFunc(func);
+    attachCallouts(fid, info.callouts);
 
     if (info.device.size > 0) {
       model.devices.set(

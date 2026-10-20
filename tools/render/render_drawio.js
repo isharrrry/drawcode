@@ -145,6 +145,25 @@ for (const s of [sheet.getDefaultVertexStyle(), sheet.getDefaultEdgeStyle()]) {
 sheet.getDefaultVertexStyle()[mx.mxConstants.STYLE_FILLCOLOR] = '#ffffff';
 sheet.getDefaultVertexStyle()[mx.mxConstants.STYLE_STROKECOLOR] = '#000000';
 
+// draw.io 的样式串里，不含 '=' 的裸段（如 "swimlane"）引用的是**命名样式**：
+// mxStylesheet.getCellStyle 拿它去查 this.styles[名]，命中就把那条样式的键值合并进来，
+// 查不到就**把这一段静默丢掉**（见 view/mxStylesheet.js，else 分支没有兜底）。
+// draw.io 客户端在初始化时注册了这批命名样式（swimlane → {shape:'swimlane'} 等），
+// 裸 mxGraph 没有，于是 "swimlane;startSize=30;…" 里的 swimlane 被丢弃、容器退回矩形：
+// 标题画到矩形正中，标题分隔线也不画。这里按已注册形状名补一份 {名: {shape: 名}}，
+// 使裸段等价于 "shape=名"。键名直接取 mxCellRenderer.defaultShapes ——
+// registerShape(key, shape) 就是以 mxConstants.SHAPE_* 的字面量（'rectangle'、'swimlane'…）为键。
+// 带 '.' 的键是 mxgraph.xxx 模板形状名，不会作为裸段出现在样式串里，略过。
+// STYLE_SHAPE 在本版本可能是 undefined（同第 49 行 STYLE_PATH 的坑），故回退字面量。
+{
+  const shapeKey = mx.mxConstants.STYLE_SHAPE || 'shape';
+  for (const shapeName of Object.keys(mx.mxCellRenderer.defaultShapes)) {
+    if (!shapeName.includes('.') && sheet.styles[shapeName] == null) {
+      sheet.putCellStyle(shapeName, { [shapeKey]: shapeName });
+    }
+  }
+}
+
 for (const k of Object.keys(mx)) {
   if (typeof mx[k] === 'function' && window[k] == null) window[k] = mx[k];
 }
@@ -193,15 +212,34 @@ const h = Math.ceil(bounds.height) + pad * 2;
 
 const svgDoc = document.implementation.createDocument('http://www.w3.org/2000/svg', 'svg', null);
 const svgRoot = svgDoc.documentElement;
-svgRoot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+// 不要再 setAttribute('xmlns', …)：文档就是以这个命名空间 createDocument 出来的，
+// 序列化器自己会写一遍，手工再加一笔就成了 `xmlns="…" xmlns="…"` 重复属性 ——
+// 浏览器宽容，严格 XML 解析器（jsdom 的 text/xml、多数命令行工具）直接报错拒收。
+// xmlns:xlink 相反必须显式写：不写的话序列化器会给每个 xlink 属性现造 nsN 前缀，
+// 而 resvg 只认字面名字 href / xlink:href，认不出 ns1:href，图片会被静默丢掉。
 svgRoot.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
 svgRoot.setAttribute('version', '1.1');
 svgRoot.setAttribute('width', String(w));
 svgRoot.setAttribute('height', String(h));
-svgRoot.setAttribute('viewBox', `0 0 ${w} ${h}`);
+// viewBox 的原点必须落在 `bounds - pad`，不能写 (0,0)。
+// mxImageExport.drawState 是按**绝对坐标**画内容的（它不减去 bounds 原点），而画布尺寸只有
+// bounds 那么大；原点写 (0,0) 时，bounds 原点一偏离 (0,0)，整张图就朝右下整体偏移，
+// 右边和下边还会被裁掉一截 —— 只有 bounds 原点恰好接近 (0,0) 的图才看不出问题（示例图就是）。
+// 下面那行白底矩形本来就是按 `pad - bounds` 画的（即假设视角原点在 bounds-pad），
+// 把 viewBox 改成同一个原点，两者才对得上。宽度高度不变，图片像素尺寸因此也不变。
+//
+// 原点再**向下/向左取整**：bounds 的坐标是容器内卡片坐标累加出来的，通常是小数，
+// 于是白底矩形的边落在像素格中间，光栅化后最右和最上一列只被覆盖一半 —— PNG 拿
+// 出来看就是贴着上边和右边的一道半透明细缝（在深色背景的看图器里像一条黑边）。
+// 把 viewBox 起点 floor、终点 ceil，矩形四条边正好压在像素边界上，白底就铺满了。
+const ox = Math.floor(bounds.x - pad);
+const oy = Math.floor(bounds.y - pad);
+const ow = Math.ceil(bounds.x - pad + w) - ox;
+const oh = Math.ceil(bounds.y - pad + h) - oy;
+svgRoot.setAttribute('viewBox', `${ox} ${oy} ${ow} ${oh}`);
 
 const canvas = new mx.mxSvgCanvas2D(svgRoot);
-canvas.rect(pad - bounds.x, pad - bounds.y, w, h);
+canvas.rect(ox, oy, ow, oh);
 canvas.setFillColor('#ffffff');
 canvas.setStrokeColor('none');
 canvas.fillAndStroke();
@@ -229,7 +267,31 @@ mx.mxImageExport.prototype.drawText = function (state, canvas) {
 exportImage.drawState(rootState, canvas);
 console.log(`textSeen=${seenText.size}`);
 
-const svgStr = new dom.window.XMLSerializer().serializeToString(svgRoot);
+const svgStr0 = new dom.window.XMLSerializer().serializeToString(svgRoot);
+
+// 图片路径归一化。JSDOM 的文档 URL 是 https://localhost/（见文件头），而 mxGraph 画
+// `shape=image` 时会拿 `image=…` 去解析成**绝对 URL**，于是设备图片在导出的 SVG 里成了
+// `href="https://localhost/图片/xx.png"` —— 浏览器打开必然裂图，而 .drawio 里存的是相对路径。
+// 这里把那个假域名前缀摘掉，还原成 .drawio 里写的相对路径；SVG 与图片目录放在一起即可显示。
+// 只摘这个字面前缀，真实的 http(s) 外链（如 assets/ads1115.svg 之外的网络图）不动。
+const DUMMY_BASE = 'https://localhost/';
+const rebased = (svgStr0.match(/href="https:\/\/localhost\//g) || []).length;
+
+// 命名空间前缀归一化。JSDOM 的 XMLSerializer 会给每个 xlink 属性**现造一个前缀**
+// （`xmlns:ns1="http://www.w3.org/1999/xlink" ns1:href="…"`，一张图里 ns1…ns12），
+// 而不是复用根上已声明的 xlink。浏览器按命名空间解析，看不出差别；但有些渲染器
+// （resvg/usvg，本工具 PNG 那一步就是它）只认字面属性名 `href` / `xlink:href`，
+// 认不出 `ns1:href` —— 结果是图片被**静默丢掉**：SVG 在浏览器里正常，PNG 里卡片全没了。
+// 所以这里统一降级成 SVG2 的裸 `href`（xlink 命名空间本来就是废弃写法），并摘掉那些
+// 只为它存在的命名空间声明；根上已有的 xmlns:xlink 声明保留，别的属主不受影响。
+const svgStr = svgStr0
+  .replace(/\s+xmlns:ns\d+="http:\/\/www\.w3\.org\/1999\/xlink"/g, '')
+  .replace(/ns\d+:href=/g, 'href=')
+  .split(`href="${DUMMY_BASE}`)
+  .join('href="');
+
+if (rebased > 0) console.log(`rebased ${rebased} image href(s) off ${DUMMY_BASE}`);
+
 fs.writeFileSync(outFile, svgStr);
 
 console.log(`cells=${graph.getModel().getChildCount(graph.getModel().root)}`);

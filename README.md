@@ -4,7 +4,7 @@
 
 > Turn annotated C / C# source into an editable [draw.io](https://www.drawio.com/) dataflow diagram — and read your hand-made layout back into the code. Three independent implementations: Python, TypeScript, .NET 10.
 
-Runs on Windows, Linux and macOS. No third-party runtime dependencies in any implementation: Python 3.10+, Node 18+, or .NET 10 (pick one).
+Runs on Windows, Linux and macOS. No third-party runtime dependencies in any implementation: Python 3.10+, Node 22.6+, or .NET 10 (pick one).
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -116,7 +116,7 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ## Development
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 71 tests
+cd python && python -m unittest discover -s tests -t .    # 124 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -132,7 +132,7 @@ command in the same column.
 
 | Claim | How it was measured | Result |
 | :--- | :--- | :--- |
-| Python implementation is correct | `python -m unittest discover -s tests -t .` | **71 tests, 0 failures, 0 skipped** |
+| Python implementation is correct | `python -m unittest discover -s tests -t .` | **124 tests, 0 failures, 0 skipped** |
 | Compressed `.drawio` is read correctly | Read back a draw.io-compressed golden file | **nodes=6, edges=6, attrs=6** — identical to the plain form |
 | Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | raises `ValueError` |
 | Generated `.drawio` is schema-valid | `lxml` XMLSchema against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |

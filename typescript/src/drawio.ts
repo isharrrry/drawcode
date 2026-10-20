@@ -22,7 +22,7 @@
 import * as zlib from "node:zlib";
 
 import { escapeHtml } from "./html.ts";
-import type { Edge, Func, Model, Signal } from "./model.ts";
+import type { Callout, Edge, Func, Model, PinnedGeom, Signal } from "./model.ts";
 import { num } from "./num.ts";
 import { compareCodePoints } from "./order.ts";
 import type { XmlElement } from "./xml.ts";
@@ -44,6 +44,77 @@ export const FUNC_EXT_STYLE = "rounded=1;whiteSpace=wrap;html=1;dashed=1;fillCol
 export const CONT_STYLE =
   `swimlane;startSize=${HEADER};collapsible=0;recursiveResize=0;fillColor=#dae8fc;strokeColor=#6c8ebf;html=1;`;
 export const EDGE_STYLE = "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;jumpStyle=arc;jumpSize=6;";
+
+/**
+ * `--straight-edges` 用的边样式：draw.io 的「直线」连接。
+ *
+ * `edgeStyle=none` 是 draw.io 里「Straight」的写法 —— 不跑任何布线算法，
+ * 直接用一条直线连 exit 点到 entry 点。所以三件事都要去掉：
+ *   - `edgeStyle=orthogonalEdgeStyle`：不清掉它，即使没有拐点，draw.io 也会**自己**再算一遍
+ *     正交走线，线照样是弯的（这是最容易漏的一步）；
+ *   - `rounded=1`：没有拐角，圆角无从谈起；
+ *   - `jumpStyle=arc/jumpSize=6`：跨线跳弧只在布线器算拐点时才产生，直线不产生跨线。
+ * `exitX/exitY/entryX/entryY` 锚点**保留** —— 它决定线从节点哪条边出发，与走法无关。
+ */
+export const STRAIGHT_EDGE_STYLE = "edgeStyle=none;html=1;";
+
+/**
+ * 被推开的边标签用的**子单元格**样式（见 laneOffsets 的说明）。
+ *
+ * 这串是 draw.io 自己拖动边标签后写的原样：`edgeLabel` 形状 + 居中。`points=[]`
+ * 是它连带写下的一对空控制点，**别删** —— 删了 draw.io 打开时会自己补回来，
+ * 文件于是"每次打开都变脏"，diff 里永远有噪音。
+ */
+export const EDGE_LABEL_STYLE =
+  "edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];";
+
+/**
+ * 设备卡片：节点本身就是一张图，名字作为标签贴在图的下方。
+ *
+ * 为什么用 `shape=image` 而不是「圆角矩形 + `image=…`」：draw.io 的格式面板给矩形加图片时
+ * 写的是 `image=…;imageAspect=0;imageWidth=…`，但那套键**只有 draw.io 自己的渲染路径认**，
+ * 核心 mxGraph 的矩形形状完全不看它 —— 离线渲染器实测一个 `<image>` 都不出。而「两条渲染
+ * 路径都能画出来」是这个项目的硬性前提（见本文件头对 `shape=path` 的说明），所以走
+ * `shape=image`：实测两条路径都能出图。
+ *
+ * 代价：图片占满整个节点框，文字只能落到框外（`verticalLabelPosition=bottom`）。
+ * 想在图里再写说明，用 Callout —— 那正是它存在的理由。
+ */
+export function funcImageStyle(asset: string): string {
+  return (
+    "shape=image;imageAspect=0;" +
+    `image=${asset};` +
+    "verticalLabelPosition=bottom;verticalAlign=top;html=1;fontSize=13;fontStyle=1;"
+  );
+}
+
+/** `[Callout]` 的三种视觉：无边框文字 / 带底色说明框 / 大片分区带。 */
+export const CALLOUT_FILL: Record<string, string> = { text: "none", box: "#fff2cc", band: "#f5f5f5" };
+export const CALLOUT_STROKE: Record<string, string> = { text: "none", box: "#d6b656", band: "#b3b3b3" };
+export const CALLOUT_FONT: Record<string, number> = { text: 12, box: 12, band: 15 };
+
+/**
+ * 文字块的样式串。
+ *
+ * `text;` 是 draw.io 的命名样式（无边框纯文本），**离线渲染器认不出这个裸段、会静默丢掉它**
+ * （原因见 tools/render/render_drawio.js 里对 mxStylesheet 的说明）。所以这里同时把
+ * strokeColor / fillColor 显式写成 none —— 裸段被丢也好、被认也好，两条渲染路径的结果都
+ * 是一个无边框的文本框。
+ *
+ * 刻意不用 draw.io 的 `shape=note`（带折角的便签）：它不在 mxCellRenderer 的默认形状表里，
+ * 离线渲染会退回矩形，等于「预览里看到的不是 draw.io 里看到的」。
+ */
+export function calloutStyle(c: Callout): string {
+  const fill = CALLOUT_FILL[c.shape] ?? "none";
+  const stroke = CALLOUT_STROKE[c.shape] ?? "none";
+  const size = c.fontSize > 0 ? c.fontSize : (CALLOUT_FONT[c.shape] ?? 12);
+  const base = c.shape === "text" ? "text;" : "rounded=1;";
+  const dashed = c.shape === "band" ? "dashed=1;" : "";
+  return (
+    `${base}whiteSpace=wrap;html=1;strokeColor=${stroke};fillColor=${fill};${dashed}` +
+    `align=left;verticalAlign=top;fontSize=${num(size)};spacingLeft=8;spacingTop=6;`
+  );
+}
 
 // 方向五边形：形状本身就表达数据流向，不再往节点上贴额外的记号。
 //
@@ -100,6 +171,20 @@ export function anchorStyle(a: Anchor): string {
 }
 
 /**
+ * 从样式串里读回锚点 —— 只在「走 `--layout-from` 拿到人工拐点、本次没有路由」
+ * 的边上用得到，此时锚点只能从写出去的那串样式里认。认不出返回 null，
+ * 由调用方退到默认锚点；draw.io 对无锚点的边是"就近贴边框"，与这里的近似无关。
+ */
+export function styleAnchor(style: string): Anchor | null {
+  const m =
+    /exitX=([\d.-]+);exitY=([\d.-]+);exitDx=[\d.-]+;exitDy=[\d.-]+;entryX=([\d.-]+);entryY=([\d.-]+);/.exec(
+      style,
+    );
+  if (m === null) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+}
+
+/**
  * 对等 Python `_attrs`：跳过 None / 空串，值走 `html.escape(quote=True)`。
  *
  * 注意这里是**第二遍**转义 —— label 里已经是 `&lt;br&gt;`，这里的 `&` 会变成 `&amp;`。
@@ -114,7 +199,12 @@ export function attrs(pairs: Array<[string, string | null | undefined]>): string
 
 export function entities(model: Model): Entity[] {
   const out: Entity[] = [];
-  for (const signal of model.signals.values()) out.push({ kind: "signal", ent: signal });
+  // 被折叠成直连边的信号不出现在图上：它已经变成那根线上的标签，
+  // 再画一个空椭圆就是个既没有入边也没有出边的悬空节点。
+  for (const signal of model.signals.values()) {
+    if (model.inlined.has(signal.id)) continue;
+    out.push({ kind: "signal", ent: signal });
+  }
   for (const func of model.funcs.values()) out.push({ kind: "func", ent: func });
   return out;
 }
@@ -339,6 +429,195 @@ export function routeEdge(
   );
 }
 
+/** 叠印的标签沿法线推开的间距，单位像素。要大于一行字高，否则还是糊在一起。 */
+export const LABEL_LANE = 17;
+
+/**
+ * 折线的**弧长中点**，以及中点处的单位法线。
+ *
+ * 为什么是弧长中点：draw.io 把边的文字放在那儿，这是从渲染结果反推出来的 ——
+ * 五条已知边的实测标签位置与弧长中点只差**同一个**常量偏移（那是我算漏的容器原点）。
+ * 用欧氏长度，不能用上面 polylineLength 的曼哈顿长度：折了弯以后两者差半个身位。
+ *
+ * 返回的法线用来决定「往哪边推开」，只在去叠印时用得上。
+ */
+export function midAndNormal(pts: Point[]): [Point, Point] {
+  const segs: number[] = [];
+  let total = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const p = pts[i] as Point;
+    const q = pts[i + 1] as Point;
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    segs.push(d);
+    total += d;
+  }
+  const first = pts[0] ?? ([0, 0] as Point);
+  if (total === 0) return [first, [0, -1]];
+
+  let acc = 0;
+  for (let i = 0; i < segs.length; i++) {
+    const seg = segs[i] as number;
+    if (acc + seg >= total / 2) {
+      const p = pts[i] as Point;
+      const q = pts[i + 1] as Point;
+      const t = seg === 0 ? 0 : (total / 2 - acc) / seg;
+      const dx = q[0] - p[0];
+      const dy = q[1] - p[1];
+      const len = Math.hypot(dx, dy) || 1;
+      return [
+        [p[0] + dx * t, p[1] + dy * t],
+        [-dy / len, dx / len],
+      ];
+    }
+    acc += seg;
+  }
+  return [pts[pts.length - 1] as Point, [0, -1]];
+}
+
+/** 边标签的字号（draw.io 默认 12），用来估算文字占多宽 —— 判重叠要用它。 */
+export const LABEL_FONT = 12;
+
+/**
+ * 标签文字的估算占位盒 `[x, y, w, h]`，**以落点为中心**。
+ *
+ * 为什么是居中而不是「从落点向右铺」：渲染件里标签是
+ * `<g text-anchor="middle"><text x="中点">…` —— 那个 `x` 是文字**中心**，不是左边缘。
+ * （曾经据「三条叠印标签的 x 完全相同」判成左对齐，那个观察对两种情况都成立，不能分辨。）
+ * 推论：判重叠不能只比落点，落点差十几像素的两条标签照样大面积互相覆盖 ——
+ * 看上去就是一团糊字，这正是要治的病。
+ * 宽度按字数估：中日韩/全角一个字一格，拉丁字母半个多格（略宽于实测，宁可多判一处）。
+ */
+function labelBox(anchor: Point, label: string): Rect {
+  const w = textWidth(label, LABEL_FONT);
+  const h = LABEL_FONT * 1.4;
+  return [anchor[0] - w / 2, anchor[1] - h / 2, w, h];
+}
+
+/** 两个占位盒是否真的压在一起（留 2 像素容差，免得贴边也算撞）。 */
+function boxesClash(a: Rect, b: Rect): boolean {
+  return (
+    a[0] < b[0] + b[2] - 2 && b[0] < a[0] + a[2] - 2 && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+  );
+}
+
+/**
+ * 把**压在一起**的标签推开，返回每条在 **y 方向**上的位移（没撞的都是 0；
+ * **正数向下、负数向上** —— 调用方直接把它写进 `as="offset"` 的 y，不再取反）。
+ *
+ * 为什么必须处理这件事：`--inline` 把一写一读的信号折成直连边之后，同一对节点
+ * 之间的几条边会走到**同一条折线**上（锚点都取边的中点，见 ANCHOR_SETS），
+ * 于是标签叠印在同一点。实测在 12 台设备 / 26 条边的总览图里有 4 处，一段话糊成
+ * 一团黑，整张图就没法读了。
+ *
+ * 算法三步：
+ *   1. 占位盒相交（boxesClash）就把两条连起来，取**连通分量** —— 一团是一个分量，
+ *      这么连是必要的：甲撞乙、乙撞丙而甲丙不撞时，三条仍得各占一个位置。
+ *   2. 团内按传入次序编号，第 1 条不动，其余按 +1、-1、+2… 交替让开 —— 一路往同
+ *      一边推的话，几条标签会推出画布外面去。第 1 条不动还有一个好处：没有叠印的
+ *      图，产物逐字节不变。
+ *
+ * 为什么只往竖直方向推，不沿各边的法线推：
+ *   - **横向推不划算**。文字是横排的，一个字那么宽、一行那么高（12 号字约 7×14），
+ *     水平分开两条标签要挪 `(宽甲+宽乙)/2`（实测「read」撞「write」要 24 像素），
+ *     竖直分开只要一个字高（约 15 像素）。而且上下两行是人的阅读习惯，左右并排不是。
+ *   - **各推各的法线会漏**。实测 small-c：一条边横走、另一条竖走，两条标签只差
+ *     6 像素；法线互相垂直，各推 17 像素之后竖直方向一点没分开，还是叠着。
+ */
+export function separateLabels(boxes: Array<Rect | null>, lane: number): number[] {
+  const out = new Array<number>(boxes.length).fill(0);
+
+  // 1. 连通分量（并查集，路径压缩交给 find 里的循环）
+  const parent = Array.from({ length: boxes.length }, (_, i) => i);
+  const find = (x: number): number => {
+    let r = x;
+    while (parent[r] !== r) r = parent[r] as number;
+    let c = x;
+    while (parent[c] !== r) {
+      const next = parent[c] as number;
+      parent[c] = r;
+      c = next;
+    }
+    return r;
+  };
+  for (let i = 0; i < boxes.length; i++) {
+    // 必须显式挡 undefined：noUncheckedIndexedAccess 下 boxes[i] 是
+    // `Rect | null | undefined`，只写 `=== null` 会漏掉 undefined，
+    // 接着传给 boxesClash(需要 Rect) 就是类型错误。
+    // 写成 `== null` 更短，但本仓库一律用 `===`，不在这里开先例。
+    const a = boxes[i];
+    if (a === null || a === undefined) continue;
+    for (let j = 0; j < i; j++) {
+      const b = boxes[j];
+      if (b === null || b === undefined || !boxesClash(a, b)) continue;
+      parent[find(i)] = find(j);
+    }
+  }
+
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < boxes.length; i++) {
+    if (boxes[i] === null) continue;
+    const root = find(i);
+    const list = groups.get(root);
+    if (list === undefined) groups.set(root, [i]);
+    else list.push(i);
+  }
+
+  // 2. 团内错开：第 1 条不动，其余按 +1、-1、+2… 试格，取**第一个真的错开**的。
+  //    为什么要试、不能直接按格号算：格号给出的位移是固定的 17 像素，可两条标签
+  //    本来就可能差着 6 像素（不相上下），往那边推 17 像素会**过冲**，落到另一侧
+  //    又只差 11 像素，仍小于一个行高 —— 还是叠着。所以按「与已落位的每一条都错开
+  //    各自半高之和」来判，判过才算。
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const placed: Array<Rect | null> = [];
+    list.forEach((idx, k) => {
+      const box = boxes[idx] as Rect;
+      if (k === 0) {
+        placed.push(box);
+        return;
+      }
+      for (let step = 1; ; step += 1) {
+        const shift = laneShift(step) * lane;
+        const moved: Rect = [box[0], box[1] + shift, box[2], box[3]];
+        if (placed.every((p) => p === null || !overlapsY(moved, p))) {
+          out[idx] = shift;
+          placed.push(moved);
+          return;
+        }
+      }
+    });
+  }
+  return out;
+}
+
+/** 两个盒子在竖直方向是否还有重叠（横向重叠与否不参与 —— 只是用来判「错开」）。 */
+function overlapsY(a: Rect, b: Rect): boolean {
+  return a[1] < b[1] + b[3] && b[1] < a[1] + a[3];
+}
+
+/** 格号 -> 竖直方向的格数。0 格不动，其余按 +1、-1、+2… 交替（下、上、下下…），
+ * 免得几条标签一起往同一边推、推出画布。 */
+export function laneShift(lane: number): number {
+  if (lane === 0) return 0;
+  return (lane % 2 === 1 ? 1 : -1) * Math.ceil(lane / 2);
+}
+
+/** 占位盒：.svg 侧的标签以落点**居中**，宽度按字数估（与 labelBox 同一套估法）。 */
+export function textBox(center: Point, label: string, font: number): Rect {
+  const [x, y] = center;
+  const w = textWidth(label, font);
+  return [x - w / 2, y - font, w, font * 1.4];
+}
+
+/** 一行文字大概占多宽：中日韩/全角一个字一格，拉丁字母半个多格。 */
+export function textWidth(label: string, font: number): number {
+  let w = 0;
+  for (const ch of label) {
+    w += /[⺀-鿿　-〿＀-￯]/.test(ch) ? font : font * 0.58;
+  }
+  return w;
+}
+
 /**
  * 实体的容器路径。
  *
@@ -531,17 +810,44 @@ export function autoWaypoints(model: Model): Map<string, Point[]> {
   return auto;
 }
 
-export function nodeLabel(kind: EntityKind, e: Signal | Func): string {
+/**
+ * 节点文字。`cards` 打开且该函数带 `asset` 时，标签只剩一行 —— 卡片框被图片占满，
+ * 图下面塞不下「别名() + 类型 名字()」两行，而设备名本来就在命中它的那行注释里。
+ *
+ * `cards` 默认关：`asset` 在默认视图里是**纯属性**（`<object>` 上带着它，供 `sync` 回写注解），
+ * 不改变节点的样式与文字。这是三实现共享的金标准（`tests/golden` 下各用例的 `expected.drawio`）
+ * 钉住的行为，单方面把 TS 的默认渲染换成图片卡片，会让 Python 与 .NET 在同一份源码上画出不同的图。
+ */
+export function nodeLabel(kind: EntityKind, e: Signal | Func, cards = false): string {
   if (kind === "signal") {
     const s = e as Signal;
     const bits = [s.ctype, s.dir, s.unit].filter((b) => b !== "");
     return `${escapeHtml(s.name)}<br>${escapeHtml(bits.join(" / "))}`;
   }
   const f = e as Func;
+  if (cards && f.asset !== "") return escapeHtml(f.alias || f.name);
   return `${escapeHtml(f.alias || f.name)}()<br>${escapeHtml(`${f.ret} ${f.name}()`)}`;
 }
 
-export function toDrawio(model: Model): string {
+/**
+ * 直连边上的可见文本。
+ *
+ * 用信号的 `unit`（中文语义名）而不是 `alias`：后者带着 `a5` 这类编号，适合做核对用的图例，
+ * 挂在线上会把线挤满。`unit` 才是读图的人要的「这条线传的是什么」。
+ *
+ * 另一端是**真节点**（信号没被折掉）时，线上写的是 `read` / `write`，也就是这条边相对那个
+ * 节点的读写方向 —— 它和箭头方向完全同义（箭头指着谁，谁的视角就是 read），纯粹是冗余。
+ * 十几条边还好，设备总览那种几十条边的图上，「read/write」会把图面糊死。所以给出
+ * `rwLabels = false`（CLI 的 `--no-rw-labels`）把这一类标签去掉；默认保持原样，不动既有产物。
+ */
+function inlineEdgeLabel(model: Model, e: Edge, rwLabels: boolean): string {
+  if (e.sig === undefined) return rwLabels ? e.rw : "";
+  const signal = model.signals.get(e.sig);
+  if (signal === undefined) return rwLabels ? e.rw : "";
+  return escapeHtml(signal.unit !== "" ? signal.unit : signal.name);
+}
+
+export function toDrawio(model: Model, cards = false, rwLabels = true, straightEdges = false): string {
   assignDefaultPositions(model);
 
   const nodes = containerTree(model);
@@ -573,6 +879,42 @@ export function toDrawio(model: Model): string {
 
   const out: string[] = [];
 
+  /**
+   * 发射文字块。它们挂在根 `parent="1"` 下、用画布绝对坐标 —— 文字块不属于任何容器
+   * （见 model.ts 的 Callout 说明），所以不做容器偏移，也不参与 `containerBox`。
+   */
+  const emitCallouts = (want: "band" | "text"): void => {
+    model.callouts.forEach((c, i) => {
+      const isBand = c.shape === "band";
+      if (isBand !== (want === "band")) return;
+      const pairs: Array<[string, string | null | undefined]> = [
+        ["id", `co${i + 1}`],
+        // 原样交给 attrs：它只转义一遍，`<br>` 在文件里成为 `&lt;br&gt;`（XML 读回即 `<br>`，
+        // draw.io 按 html=1 换行）。这里若先 escapeHtml 一遍，文件里会变成 `&amp;lt;br&amp;gt;`，
+        // 读回来是**字面量** `&lt;br&gt;`，图上就显示成这七个字符。
+        ["label", c.text],
+        ["symbolId", c.id],
+        ["kind", "callout"],
+        ["owner", c.owner],
+      ];
+      out.push(
+        `        <object ${attrs(pairs)}>\n` +
+          `          <mxCell style="${calloutStyle(c)}" vertex="1" parent="1">\n` +
+          `            <mxGeometry x="${num(c.x)}" y="${num(c.y)}" width="${num(c.w)}" height="${num(c.h)}" as="geometry" />\n` +
+          `          </mxCell>\n` +
+          `        </object>\n`,
+      );
+    });
+  };
+
+  // 分区带写在**容器之前**。draw.io 按文档顺序叠放，而一个单元格是连同它的整棵子树一起画的；
+  // 「根 → 容器 → 卡片」这棵子树会在容器那一格被画到时整块画完。带是根的直接子节点，
+  // 只要排在容器后面，它就落在整棵子树的**上面**，把容器里每一张卡片都盖住
+  // （只把带排到卡片前面解决不了：卡片不是根的兄弟，是容器的孩子）。
+  // 说明文字（box / text）仍旧最后画 —— 它本来就该压在卡片上面。
+  emitCallouts("band");
+
+
   for (const p of paths) {
     const [ox, oy, ow, oh] = boxes.get(p) as Rect;
     const [pox, poy] = originOf(p);
@@ -592,16 +934,18 @@ export function toDrawio(model: Model): string {
     const eb = boxes.get(epath) as Rect;
     const ox = eb[0];
     const oy = eb[1];
+    // `Style` 是原样追加在样式串末尾的片段（角色分色这类装饰）。空串时等于没追加，
+    // 所以不写 Style 的源码产物逐字节不变。
     const style =
       kind === "signal"
-        ? (SIGNAL_DIR_STYLE[(ent as Signal).dir] ?? SIGNAL_STYLE)
-        : (ent as Func).external
-          ? FUNC_EXT_STYLE
-          : FUNC_STYLE;
+        ? (SIGNAL_DIR_STYLE[(ent as Signal).dir] ?? SIGNAL_STYLE) + (ent as Signal).style
+        : cards && (ent as Func).asset !== ""
+          ? funcImageStyle((ent as Func).asset) + (ent as Func).style
+          : ((ent as Func).external ? FUNC_EXT_STYLE : FUNC_STYLE) + (ent as Func).style;
 
     const pairs: Array<[string, string | null | undefined]> = [
       ["id", cellId.get(ent.id)],
-      ["label", nodeLabel(kind, ent)],
+      ["label", nodeLabel(kind, ent, cards)],
       ["symbolId", ent.id],
       ["kind", kind],
     ];
@@ -643,8 +987,13 @@ export function toDrawio(model: Model): string {
     );
   }
 
+  emitCallouts("text");
+
   const sortedEdges = model.edges.slice().sort((a, b) => compareCodePoints(edgeKey(a), edgeKey(b)));
-  sortedEdges.forEach((e, i) => {
+
+  // 边分两趟：第一趟算走法、标签落点与几何；第二趟才写 XML。
+  // 分两趟是**去叠印**逼出来的：落点要和**所有**边比过才知道哪几条叠在一起。
+  const laid = sortedEdges.map((e, i) => {
     const srcEnt = model.signals.get(e.src) ?? model.funcs.get(e.src);
     const dstEnt = model.signals.get(e.dst) ?? model.funcs.get(e.dst);
     const srcPath = srcEnt === undefined ? "misc" : entityPath(srcEnt);
@@ -654,25 +1003,28 @@ export function toDrawio(model: Model): string {
     const sb = boxes.get(srcPath) as Rect;
     const [ox, oy]: Point = parent !== "1" ? [sb[0], sb[1]] : [0, 0];
 
-    let style = EDGE_STYLE;
+    let style = straightEdges ? STRAIGHT_EDGE_STYLE : EDGE_STYLE;
+    // 内联边的颜色跟着它折叠掉的那个信号走：信号上的 Style 片段本来是给节点用的，
+    // 节点没了，这个片段就落到线上 —— 否则「按关系性质分色」这类图就没有可以着色的地方。
+    if (e.rw === "inline" && e.sig !== undefined) {
+      const sig = model.signals.get(e.sig);
+      if (sig !== undefined) style += sig.style;
+    }
+    let anchors: Anchor | null = null;
+    // 直线模式**只丢自动拐点**，`--layout-from` 里人工画上的拐点照样保留：
+    // 那是人明确放上去的东西，不该被一个样式开关悄悄吞掉。
     let waypoints: Point[] = [...e.waypoints];
     if (waypoints.length === 0) {
       const avoid = entities(model).map(({ ent }): Rect => [ent.x, ent.y, ent.w, ent.h]);
       const gap =
         parent === "1" ? crossGap(sb, boxes.get(dstPath) as Rect) : null;
-      const [anchors, pts] = routeEdge(model, e, avoid, gap);
-      waypoints = pts;
-      if (anchors !== null) style += anchorStyle(anchors);
+      // 拐点可以丢，锚点不能丢：routeEdge 选出的出入口决定了线贴着哪条边，
+      // 丢了它 draw.io 会自己就近挑边，"左右相连"可能变成从上下出线。
+      const [a, pts] = routeEdge(model, e, avoid, gap);
+      anchors = a;
+      waypoints = straightEdges ? [] : pts;
+      if (a !== null) style += anchorStyle(a);
     }
-
-    const pairs: Array<[string, string | null | undefined]> = [
-      ["id", `e${i + 1}`],
-      ["label", e.rw],
-      ["rel", "def-use"],
-      ["src", e.src],
-      ["dst", e.dst],
-      ["rw", e.rw],
-    ];
 
     let geom: string;
     if (waypoints.length > 0) {
@@ -686,14 +1038,65 @@ export function toDrawio(model: Model): string {
       geom = '<mxGeometry relative="1" as="geometry" />';
     }
 
+    // 折线 = 出锚点 -> 拐点 -> 入锚点。锚点取自本次路由的结果；走 `--layout-from`
+    // 拿到人工拐点的边没有锚点可依，退到样式串里记着的锚点，再退到默认左右中点
+    // （draw.io 自己的默认是"就近贴边框"，这里只是给去叠印一个够用的近似）。
+    const a: Anchor = anchors ?? styleAnchor(style) ?? [1.0, 0.5, 0.0, 0.5];
+    const [sp, dp] = endpoints(rect(model, e.src), rect(model, e.dst), a);
+    const [anchor, normal] = midAndNormal([sp, ...waypoints, dp]);
+
+    return { i, e, style, parent, geom, label: inlineEdgeLabel(model, e, rwLabels), anchor, normal };
+  });
+
+  const shifts = separateLabels(
+    laid.map((x) => (x.label === "" ? null : labelBox(x.anchor, x.label))),
+    LABEL_LANE,
+  );
+
+  for (const le of laid) {
+    const id = `e${le.i + 1}`;
+    const shiftY = shifts[le.i] as number;
+    const moved = shiftY !== 0;
+    const pairs: Array<[string, string | null | undefined]> = [
+      ["id", id],
+      // 被推开的标签不再留在边上：draw.io 自己拖标签时就是把文字挪进子单元格，
+      // 两处都留着会画两遍。
+      ["label", moved ? "" : le.label],
+      ["rel", "def-use"],
+      ["src", le.e.src],
+      ["dst", le.e.dst],
+      ["rw", le.e.rw],
+    ];
+    // 折叠掉的信号 id 留在边上：回读与校验时才能把这根线还原回 a5 那样的编号
+    if (le.e.sig !== undefined) pairs.push(["sig", le.e.sig]);
+
     out.push(
       `        <object ${attrs(pairs)}>\n` +
-        `          <mxCell style="${style}" edge="1" parent="${parent}" source="${cellId.get(e.src)}" target="${cellId.get(e.dst)}">\n` +
-        `            ${geom}\n` +
+        `          <mxCell style="${le.style}" edge="1" parent="${le.parent}" source="${cellId.get(le.e.src)}" target="${cellId.get(le.e.dst)}">\n` +
+        `            ${le.geom}\n` +
         `          </mxCell>\n` +
         `        </object>\n`,
     );
-  });
+
+    if (!moved) continue;
+    // 位移写进 `<mxPoint as="offset">`，**不要**写进 `mxGeometry` 的 x/y。
+    //
+    // mxGraphView.getPoint（mxGraphView.js:2011-2074）里这两条路的语义完全不同：
+    //   - `geometry.y`（代码里的 gy）沿矢量 `(dy/L, -dx/L)` 位移 —— 也就是**永远垂直于那条边**，
+    //     位移方向随边的走向转：横边上是上下、竖边上就成了左右。实测：把 y 从 -17 改成 -200，
+    //     一条竖向边的标签只横向跑了 183px，纵向纹丝不动。
+    //     上一版就是踩了这个坑：算法按下都推开了，画出来却横着散开，该叠的还是叠着。
+    //   - `geometry.offset`（即 `<mxPoint as="offset">`）直接加到点上 —— **全局坐标轴**，
+    //     与边怎么走无关。受控实验（一条 L 形边）：offset `(150, 0)` → 落点 x+150.5；
+    //     offset `(0, -120)` → 落点 y-119.5。方向符合直觉：正数往下/往右。
+    // `geometry.x`（=0）是**沿边**的相对位置，0 表示弧长中点，保持不动。
+    out.push(
+      `        <mxCell id="${id}_label" value="${escapeHtml(le.label, true)}" style="${EDGE_LABEL_STYLE}" vertex="1" connectable="0" parent="${id}">\n` +
+        `          <mxGeometry x="0" y="0" relative="1" as="geometry">` +
+        `<mxPoint x="0" y="${num(shiftY)}" as="offset" /></mxGeometry>\n` +
+        `        </mxCell>\n`,
+    );
+  }
 
   return (
     '<mxfile host="app.diagrams.net" agent="drawcode" type="device">\n' +
@@ -987,6 +1390,10 @@ function foreignCells(
   for (const [cid, info] of cells) {
     if (info.edge || info.symbolId !== null) continue;
     if (containers.has(cid)) continue; // 容器本身就是 swimlane，不是用户新加的元素
+    // **挂在边下面的单元格是标签，不是节点**：去叠印写出的子标签单元格就长这样
+    // （parent 指向那条边）。漏掉这一条，`sync` 会把每条被推开的标签都当成
+    // 「用户在图上新加的节点」，然后往源码里写一个名叫「经局域网读取数据集」的函数。
+    if (info.parent !== null && cells.get(info.parent)?.edge === true) continue;
     const geom = findChild(info.cell, "mxGeometry");
     if (geom === null) continue;
     out.push({
@@ -1013,18 +1420,118 @@ function samePoints(a: Point[], b: Point[]): boolean {
 }
 
 /**
- * 把读回来的排版叠加到刚解析出的 IR 上 —— 这是 `--layout-from` 的核心。
+ * 覆盖几何**之前**取的基线快照：每个实体此刻的 `[x, y, w, h]`。
  *
- * 三件事，顺序不能反：
+ * 调用方必须先跑过一次 `assignDefaultPositions`，快照里才是「build 本来会写进
+ * `.drawio` 的几何」（源码声明的 `xy`/`size` 优先，没声明则是默认布局值）。这份基线
+ * 是 `applyLayout` 判断「哪些几何是人动过的」的对照物 —— 只用一次，所以不必深拷贝，
+ * 数组是这里新造的。
+ *
+ * 两个 map 都收：`entities()` 会跳过被 `inline` 折叠的信号，而覆盖循环靠
+ * `signals.get(sid) ?? funcs.get(sid)` 命中实体 —— 两者的集合必须对齐，
+ * 否则折叠过的信号在图上被拖了也记不进 `pinned`。
+ */
+function geometrySnapshot(model: Model): Map<string, Rect> {
+  const snap = new Map<string, Rect>();
+  for (const signal of model.signals.values()) snap.set(signal.id, [signal.x, signal.y, signal.w, signal.h]);
+  for (const func of model.funcs.values()) snap.set(func.id, [func.x, func.y, func.w, func.h]);
+  return snap;
+}
+
+/**
+ * `geometrySnapshot` 的逆操作：把快照写回实体。
+ *
+ * 存在的唯一理由是让「取基线」变成**非破坏性**的 —— 见 applyLayout 开头的说明。
+ * 遍历的是实体侧而不是快照侧：快照是实体的子集，遍历实体能保证一个都不漏；
+ * 若反过来遍历快照，不在快照里的实体会被留在「已经被布局改过」的状态。
+ */
+function restoreGeometry(model: Model, snap: Map<string, Rect>): void {
+  for (const signal of model.signals.values()) {
+    const r = snap.get(signal.id);
+    if (r === undefined) continue;
+    signal.x = r[0]; signal.y = r[1]; signal.w = r[2]; signal.h = r[3];
+  }
+  for (const func of model.funcs.values()) {
+    const r = snap.get(func.id);
+    if (r === undefined) continue;
+    func.x = r[0]; func.y = r[1]; func.w = r[2]; func.h = r[3];
+  }
+}
+
+/**
+ * 把「读回值与 baseline 快照不一致」记进 `model.pinned` —— 也就是要回写源码的
+ * 人工排版意图。用**精确不等**，不设浮点容差：坐标本来就是整数，容差只会把
+ * 「只拖动了一两个像素」这种真实排版吞掉。
+ */
+function recordPinned(model: Model, sid: string, base: Rect | undefined, read: Rect): void {
+  if (base === undefined) return;
+  const [bx, by, bw, bh] = base;
+  const [x, y, w, h] = read;
+  const geom: PinnedGeom = {};
+  if (x !== bx || y !== by) geom.xy = [x, y]; // 注意存的是**读回值**（绝对画布坐标）
+  if (w !== bw || h !== bh) geom.size = [w, h];
+  if (geom.xy !== undefined || geom.size !== undefined) model.pinned.set(sid, geom);
+}
+
+/**
+ * 把读回来的排版叠加到刚解析出的 IR 上 —— 这是 `--layout-from` 与 `sync` 的核心。
+ *
+ * 四件事，顺序不能反：
+ *   0. **基线**：先跑 assignDefaultPositions 摆好默认布局，再快照每个实体的
+ *      [x,y,w,h] —— 这就是「build 本来会写进 .drawio 的几何」。读出值偏离基线
+ *      （精确不等）的实体记进 model.pinned，供回写侧写进源码注解（见 PinnedGeom）；
  *   1. 覆盖节点几何（x/y/w/h），用户拖过的位置才算数；
  *   2. 覆盖注解属性（alias/unit/note/tooltip 与信号方向），**用户的编辑优先于源码**；
  *   3. 拐点只在"与自动算出来的不同"时才采纳 —— 参见 autoWaypoints 的说明：
  *      相同说明这条边没被人动过，应继续跟随自动路由，否则源码一改布局就僵死。
+ *
+ * 判据为什么是「与 build 会写出的值比」而不是「与默认布局比」：一个节点在源码里
+ * **已经有** `xy` 时，它的坐标本来就与默认布局不同 —— 若拿默认布局当基准，每次
+ * `sync` 都会把这个键重写一遍，而 `sync` 的核心验收标准是「没人动过就零 diff」。
+ * 基准取「build 会写出什么」（源码声明值，没声明则是默认布局值），两个来源才归一
+ * 到同一条线上：**只有读出值与 build 产物不一致，才算人拖过**。
+ *
+ * 已知边界：若用户在 build 之后、sync 之前改过源码（插入了节点，默认布局整体位移），
+ * 那些被挪动但没人碰过的节点会被误判成「人拖过」而钉进源码。这与既有 autoWaypoints
+ * 对边的处理是同一类脆弱性，属已知取舍，本轮不解决。
+ *
+ * 取基线时多调了一次 assignDefaultPositions，但**跑完立刻把模型恢复原状**
+ * （`live` 快照 -> assignDefaultPositions -> `base` 快照 -> restoreGeometry）。
+ * 这么绕是为了绕开一个实测出来的坑：
+ *
+ *   assignDefaultPositions **不是固定点** —— 单层容器成立，多层容器（path 含 `/`）不成立。
+ *   多层下每调一次，非最深层的实体整体右移 PAD(30)，且不收敛（450 -> 480 -> 510）。
+ *   根因在 layoutTree 的 `dx = cursor - box[0]` 平移累加：已带全局坐标的子孙层没法再被
+ *   归一化回局部原点。这是**先于本特性就存在**的缺陷（该函数在 HEAD 与工作区逐字节相同），
+ *   修它超出本特性范围（会动金标准），故只记录、不处理。
+ *
+ *   如果像最初那样「就地多调一次、把结果留在模型里」，多层容器下这次调用会把实体挪走，
+ *   于是：读回值偏离「build 会写出的值」——**没人拖过的节点也被判定成「人拖过」而进
+ *   pinned**，sync 就写出源码里本没有的 xy；第二次 sync 又因为基线变了而再写一遍，
+ *   幂等性直接崩掉（adopt 的两条幂等测试正是这么红的）。
+ *   恢复原状之后，这次调用对模型、对后续所有环节都是只读的，多层的非幂等性伤不到任何人。
+ *
+ * 基线为什么必须来自「跑一遍 assignDefaultPositions 之后」而不是源码声明值：
+ * 见下面那段「判据为什么是与 build 会写出的值比」。
  */
 export function applyLayout(model: Model, layout: Layout): Model {
-  for (const [sid, [x, y, w, h]] of layout.nodes) {
+  model.pinned.clear();
+  // 取基线必须是**非破坏性**的：先把调用前的几何整体快照下来，跑一次
+  // assignDefaultPositions 拿到「build 本来会写出的值」，随即把模型恢复原状。
+  // 于是基线是准的，而模型状态与调用前逐字段相同 —— 后面的坐标覆盖、容器归属、
+  // adoptForeign 拿到的还是原来那个模型（理由见上面那段长注释）。
+  const live = geometrySnapshot(model);
+  assignDefaultPositions(model);
+  const base = geometrySnapshot(model);
+  restoreGeometry(model, live);
+
+  for (const [sid, box] of layout.nodes) {
     const ent = model.signals.get(sid) ?? model.funcs.get(sid);
+    // 容器 cell、callout（两者都以 symbolId 形态出现在 layout.nodes 里）与图上未知
+    // 的 id 都在这里挡掉：它们不是实体，没有「人工改过的几何」可回写。
     if (ent === undefined) continue;
+    recordPinned(model, sid, base.get(sid), box);
+    const [x, y, w, h] = box;
     ent.x = x;
     ent.y = y;
     ent.w = w;

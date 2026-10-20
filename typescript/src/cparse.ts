@@ -54,13 +54,16 @@ export const FUNC_RE =
 
 const ASSIGN_RE = /(?<![=!<>+\-*/%&|^])=(?!=)/;
 const COMPOUND_RE = /(?:\+|-|\*|\/|%|&|\||\^|<<|>>)=/;
-const IDENT_RE = /[A-Za-z_]\w*/;
-const CALL_RE = /([A-Za-z_]\w*)\s*\(/;
+// 标识符字符集必须是 Unicode：C# 编译器接受中文名字，`a5_采样值 = …` 与
+// `测试桩.处理(…)` 里的中文名都要能被 def/use 扫到，否则信号名中文化后所有边会静默消失。
+// C 侧只用到其中的 ASCII 子集，行为不变。
+const IDENT_RE = /[\p{L}_][\p{L}\p{N}_]*/u;
+const CALL_RE = /([\p{L}_][\p{L}\p{N}_]*)\s*\(/u;
 export const KV_RE = /(\w+)\s*=\s*"([^"]*)"/;
 
 const ANNOTATION_TAG_RE = /^@(\w+)\s*(.*)$/;
-const PARAM_RE = /^(?<ctype>.+?)\s*(?<name>[A-Za-z_]\w*)$/;
-const SPLIT_SIGNAL_RE = /^([A-Za-z_]\w*)\s*(\[[^\]]*\])?$/;
+const PARAM_RE = /^(?<ctype>.+?)\s*(?<name>[\p{L}_][\p{L}\p{N}_]*)$/u;
+const SPLIT_SIGNAL_RE = /^([\p{L}_][\p{L}\p{N}_]*)\s*(\[[^\]]*\])?$/u;
 const KV_BARE_RE = /(\w+)\s*=\s*([A-Za-z_]\w*)/;
 
 /** 把 'g_coeff[32]' 拆成 ['g_coeff', '[32]']。*/
@@ -86,6 +89,42 @@ export function containerPath(meta: Map<string, string>, rel: string): string {
 /** path 的第一段，即最外层容器名。*/
 export function topGroup(path: string): string {
   return path.split("/")[0] as string;
+}
+
+/**
+ * 把 `xy="x,y"` / `size="宽x高"` 落到实体的几何字段上 —— 信号与函数共用同一份容差。
+ *
+ * **容差必须与 csparse.ts（C# 前端）的同名函数逐字一致**，这里是照它的写法抄的：
+ * 逗号切 `xy`、小写 `x` 切 `size`、一律 `Number()`。理由是同一份布局意图
+ * （`xy="420,160"`）在两个前端必须得到同一个数 —— IR 的 x/y/w/h 属于布局维度，
+ * L1 金标准刻意不比对它们（见 model.ts 头部），两边切法一旦不同，
+ * 「同一份源码在 C 与 C# 里排出来的图不一样」会是**没有任何测试会报警**的差异。
+ *
+ * 写错分隔符（如把 `size="180x72"` 写成 `size="180,72"`）时**不做校验、不报错、不兜底**：
+ * 切不出第二段就静默得到 NaN / undefined 传给下游 —— 与 C# 前端完全相同的静默行为。
+ * 为什么选静默而不是在这里报错：本次的硬约束是「畸形输入也要与 C# 前端一致」，
+ * 报错只会让两侧分叉；且校验属于行为变更，不在本次对齐的范围里。
+ * 实测结果（哪个字段是 NaN、哪个是 undefined）见 test/parse.test.ts。
+ *
+ * 两版实现各自保留一份副本、互不 import、互不改对方的文件，是本仓库的既有约定。
+ * 缺键（undefined 或空串）不动默认值：信号 160x60、函数 180x72，来自 model.ts。
+ */
+export function applyGeometry(
+  ent: { x: number; y: number; w: number; h: number },
+  meta: Map<string, string>,
+): void {
+  const xy = meta.get("xy");
+  if (xy !== undefined && xy !== "") {
+    const parts = xy.split(",").map((v) => Number(v));
+    ent.x = parts[0] as number;
+    ent.y = parts[1] as number;
+  }
+  const size = meta.get("size");
+  if (size !== undefined && size !== "") {
+    const parts = size.toLowerCase().split("x").map((v) => Number(v));
+    ent.w = parts[0] as number;
+    ent.h = parts[1] as number;
+  }
 }
 
 /** 擦除块注释与行注释（对等 Python 侧带 re.S 的 `/*...*/` 替换，再做 `//...` 替换）。*/
@@ -351,22 +390,27 @@ export function parseProject(paths: string[], root?: string): Model {
 
   for (const rs of rawSignals) {
     const cpath = containerPath(rs.meta, rs.rel);
-    model.addSignal(
-      makeSignal({
-        id: `${rs.rel}::${rs.name}`,
-        name: rs.name,
-        ctype: rs.ctype,
-        dir: rs.dir,
-        file: rs.rel,
-        line: rs.line,
-        unit: rs.meta.get("unit") ?? "",
-        alias: rs.meta.get("alias") ?? "",
-        note: rs.meta.get("note") ?? "",
-        external: rs.meta.get("external") === "true",
-        group: topGroup(cpath),
-        path: cpath,
-      }),
-    );
+    const signal = makeSignal({
+      id: `${rs.rel}::${rs.name}`,
+      name: rs.name,
+      ctype: rs.ctype,
+      dir: rs.dir,
+      file: rs.rel,
+      line: rs.line,
+      unit: rs.meta.get("unit") ?? "",
+      alias: rs.meta.get("alias") ?? "",
+      note: rs.meta.get("note") ?? "",
+      external: rs.meta.get("external") === "true",
+      group: topGroup(cpath),
+      path: cpath,
+      // 与 csparse.ts 同源：`style` 原样透传进 IR，解析器不解读它 —— 把片段拼进
+      // mxGraph 样式串是 drawio.ts 的职责。缺键 = 空串 = 用默认样式。
+      style: rs.meta.get("style") ?? "",
+    });
+    // 几何键对信号也生效。此前 C 侧只有函数分支读 xy/size、信号分支静默忽略，
+    // 于是同一份注解在两个前端会得到不同布局；现在两边共用同一套容差（见 applyGeometry）。
+    applyGeometry(signal, rs.meta);
+    model.addSignal(signal);
   }
 
   const signalsByName = new Map<string, string>();
@@ -389,24 +433,16 @@ export function parseProject(paths: string[], root?: string): Model {
       note: meta.get("note") ?? "",
       tooltip: meta.get("tooltip") ?? "",
       asset: meta.get("asset") ?? "",
+      // 同信号分支：`style` 原样透传，解析器不解读它。
+      style: meta.get("style") ?? "",
       external: meta.get("external") === "true",
       group: topGroup(fpath),
       path: fpath,
     });
+    // 几何键统一走 applyGeometry：与原先就地写的那段逐字等价（同容差、同「缺键不动」
+    // 守卫），抽出来只为让信号与函数共用一份，杜绝两处日后各自漂移。
+    applyGeometry(func, meta);
     model.addFunc(func);
-
-    const xy = meta.get("xy");
-    if (xy !== undefined && xy !== "") {
-      const parts = xy.split(",").map((v) => Number(v));
-      func.x = parts[0] as number;
-      func.y = parts[1] as number;
-    }
-    const size = meta.get("size");
-    if (size !== undefined && size !== "") {
-      const parts = size.toLowerCase().split("x").map((v) => Number(v));
-      func.w = parts[0] as number;
-      func.h = parts[1] as number;
-    }
 
     const device = info.device;
     if (device !== undefined && device.size > 0) {

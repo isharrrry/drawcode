@@ -12,11 +12,12 @@
 
 ```bash
 cd typescript
-npm test                    # 105 个测试，0 依赖，0 skip
+npm test                    # 175 个测试（报表 176，含 helpers.ts 条目），0 依赖，0 skip
 node bin/drawcode.ts build src/*.c src/*.h --root src --out flow.drawio --svg flow.svg
 ```
 
-**零运行时依赖、零 devDependency。** Node ≥ 22.6 原生擦除类型直接跑 `.ts`，不需要 tsc，
+**零运行时依赖。** devDependency 只有 `typescript` 与 `@types/node`，且仅服务 `typecheck` 与 IDE；
+Node ≥ 22.6 原生擦除类型直接跑 `.ts`，测试不需要 tsc，
 也不需要 `@xmldom/xmldom`（XML 解析器 200 行就够，而且让三版 benchmark 站在同一起跑线）。
 
 ---
@@ -48,7 +49,7 @@ node bin/drawcode.ts build src/*.c src/*.h --root src --out flow.drawio --svg fl
 ## 2. IR 的 TypeScript 类型（完整字段）
 
 ```ts
-type Direction = "in" | "out" | "inout";
+type Direction = "in" | "out" | "inout" | "";  // 空串合法：没写 dir 的信号照样成立，只是没方向
 
 interface Signal {
   id: string;        // "<rel-path>::<name>"，例如 "adc.h::g_raw"
@@ -62,6 +63,8 @@ interface Signal {
   note: string;
   external: boolean; // @drawcode external="true"
   group: string;     // 文件名去扩展名 —— 容器的来源
+  path: string;      // 容器层级 "adc/采样前端"；空串会归一化成模块名，所以下游拿到的恒非空
+  style: string;     // 追加到节点样式串末尾的原始片段（[Drawcode(Style="…")]）；C 侧没有这个键
   // 以下是**布局维度**，不进 L1 金标准
   x: number; y: number;
   w: number;  // 默认 160
@@ -76,7 +79,8 @@ interface Func {
   params: Param[];           // 形参是端口，不是节点
   file: string; line: number;
   alias: string; note: string; tooltip: string; asset: string;
-  external: boolean; group: string;
+  style: string;             // 同 Signal.style
+  external: boolean; group: string; path: string;
   reads: string[];   // signalId[]，来自**函数体扫描**
   writes: string[];  // signalId[]
   calls: string[];   // funcId[]
@@ -93,11 +97,27 @@ interface Edge {
 
 interface Device { vendor: string; model: string; spec: string; size: string; asset: string }
 
+/**
+ * 自由文本块（`[Callout("…", Xy = "40,40", Size = "260x60", Style = "box")]`）。
+ * **不挂在被建模的实体上**：它寄存在某个真实方法上，只是为了跟图待在同一个文件里 ——
+ * 位置完全由 `Xy` 的绝对画布坐标决定，与宿主方法的位置无关。
+ */
+interface Callout {
+  id: string;
+  text: string;                    // 可含 <br>：draw.io 按 HTML 换行，离线渲染器把它转成换行
+  owner: string;                   // 宿主实体 id，仅作溯源；空串 = 整张图的说明
+  shape: "text" | "box" | "band";  // 无边框文字 / 带底色说明框 / 大片分区带
+  fontSize: number;                // 0 = 用该种类的默认值
+  x: number; y: number; w: number; h: number;
+}
+
 class Model {
   signals: Map<string, Signal>;
   funcs: Map<string, Func>;
   edges: Edge[];
   devices: Map<string, Device>;
+  callouts: Callout[];       // 与实体无关的自由文本块
+  inlined: Set<string>;      // 被 --inline 折叠成直连边的信号 id —— entities() 必须跳过它们
   files: string[];
   rebuildEdges(): Edge[];   // reads → (signal → func, read)；writes → (func → signal, write)
 }
@@ -123,18 +143,62 @@ class Model {
        ├─ 注解含 dir= → SIGNAL_RE  命中 → rawSignals
        └─ FUNC_RE    命中 → rawFuncs（.h 覆盖 .c 的元数据）
   → 注解块 readAnnotations() → Map<string,string>（dir/unit/alias/note/xy/size/...）
+       └─ C# 侧另有 readMeta() → 四元组，第四位是 [Callout] 列表（一个声明可挂多个）
   → 建 Signal/Func，id = `${rel}::${name}`，group = stem(rel)
   → bodies() 抽函数体 → defUse() → reads/writes/calls
   → Model.rebuildEdges()
-  → toDrawio(model)
+  → cli.ts 的两道**改内容**的预处理（都在布局之前，顺序不能反）
+       ├─ --inline   → collapseSignals()：一写一读的信号折成设备直连，
+       │                节点进 model.inlined，entities() 跳过它们；id 留在边的 sig 属性上
+       └─ --layout-from → applyLayout(model, readLayout(file))：人工排版覆盖默认坐标
+  → toDrawio(model, cards, rwLabels)
        ├─ assignDefaultPositions()  组内按 id 垂直堆叠，组间水平避让
-       ├─ 每个 group 一个 swimlane 容器
-       ├─ 节点写 <object>，geometry 是**父容器相对**坐标
+       ├─ containerTree() → 容器按 codepoint 排序，gid = grpN；boxes = 各容器的绝对矩形
+       ├─ entities() → 节点按 id 排序，cellId = nN（inlined 的已排除）
+       ├─ emitCallouts("band")   ★ 必须**早于容器**（见下）
+       ├─ 容器：每 group 一个 swimlane，geometry 相对**父容器**原点
+       ├─ 节点：写 <object symbolId=… kind=…>，geometry 相对**自己的容器**原点
+       │    样式 = 基样式 + 源码里的 Style 片段（空 Style 时产物逐字节不变）
+       │    --cards 且 asset ≠ "" → funcImageStyle(asset)，卡片变成图片
+       ├─ emitCallouts("text")   box / text，此时在卡片之上
        └─ 每条边：
             waypoints 非空 → 直接用（人工排版，坐标是绝对的）
             waypoints 为空 → route() 选锚点+拐点（写进 <Array as="points">）
-       → 边写 <Array as="points"> 时把绝对坐标**减掉父容器原点**
+            → 写 <Array as="points"> 时把绝对坐标**减掉父容器原点**
+       └─ 边标签去叠印（见下一节）
 ```
+
+★ 分区带为什么要抢在容器前面：draw.io 按文档顺序叠放，而**一个单元格是连同它的整棵子树
+一起画的**。「根 → 容器 → 卡片」这棵子树会在容器那一格被画到时整块画完，带是根的直接子节点，
+排在容器后面就落在整棵子树**上面**，把容器里每张卡片都盖住。只把带排到卡片前不解决问题 ——
+卡片不是根的兄弟，是容器的孩子。
+
+### 边标签去叠印（TypeScript 独有）
+
+信号一多，两三条边的中点会撞在同一个位置，标签叠成一片黑。做法是**只挪文字，不动线**：
+
+```
+每条边求 [出锚点, …拐点, 入锚点] → midAndNormal() → 边上弧长中点 + 单位法向
+  → labelBox()                     以中点为心量出标签盒
+  → separateLabels(boxes, LANE)    撞上的做并查集连通分量，逐条试格
+  → 位移写进子单元格的 <mxPoint as="offset">，边自己的 label 置空
+```
+
+- `laneShift(step) = (step % 2 === 1 ? 1 : -1) * ceil(step / 2)`（+1, −1, +2, −2…）× `LABEL_LANE(17)`。
+  **试格直到与已落位的每一条都 `!overlapsY`** —— 少了这一步会过冲，为了躲 A 又压上 B。
+- 同一条边上的两条标签是**串联**处理的：挪走一条后另一条跟着整体平移，不然组内的相对关系会散。
+
+两个几何坑，改这附近代码前务必先看 `drawio.ts` 里那段长注释：
+
+- `mxGeometry` 的 `y` 是**垂直于边**的位移（`mxGraphView.js:2011` 沿 `(dy/L, -dx/L)` 走），
+  所以一条竖边的标签看起来会横着跑 —— 按下推开的算法会长出横着散开的结果。**别用它。**
+- `<mxPoint as="offset">` 加的是**全局坐标轴**位移，正数往右/往下，与边的走向无关。用它。
+- `mxGeometry` 的 `x`（=0）是沿边的位置，0 表示弧长中点，保持不动。
+
+去叠印是 TS 独有：Python 与 .NET 全部把标签留在边上，同样的输入会得到更少的单元格和叠在一起的字。
+金标准 `small-c` 里没有一对撞上的标签，所以**金标准全绿也照不出这套逻辑的退化** ——
+它的测试在 `test/drawio.test.ts` 末尾，自带一个「两条边折线完全重合」的确定性夹具。
+见 `docs/conformance.md` 的 Known divergence。
 
 ### 反向：`.drawio` → IR
 
@@ -147,7 +211,22 @@ XML 文本
   → readLayout()      { nodes: Map<symbolId,[x,y,w,h]>, edges: Map<"src->dst:rw", Point[]>, attrs }
   → applyLayout()     写回 IR；随后用 autoWaypoints() 认出"这是生成器写的"并清空，
                       只保留人工拖出来的拐点
+  → foreignCells()    找「图里有、IR 里没有」的顶点，交给 adopt 接回源码
 ```
+
+读回时会碰到的三类「看着像节点、其实不是」的单元格，`foreignCells()` 逐一排除：
+
+| 单元格 | 特征 | 不排除的后果 |
+| :--- | :--- | :--- |
+| 容器 | id 在 `containers` 里 | 把 swimlane 当成用户新加的函数 |
+| 去叠印标签 | `parent` 指向一条 `edge="1"` 的单元格 | **往源码里写一个名叫「经局域网读取数据集」的函数** |
+| 文字块 | 带 `symbolId`（= `Callout.id`）| 把一段说明文字当成新函数写进源码 |
+
+文字块的位置**读不回来**：`applyLayout()` 只查 `model.signals` / `model.funcs`，查不到就
+`continue`，所以 `--layout-from` 时文字块会弹回源码里的 `Xy`，在 draw.io 里拖动它没有用。
+这不是遗漏而是没做的功能 —— 两版的 `codegen` 都不回写几何，节点拖了位置也照样不写回 `.cs`，
+只是节点能在同一个 `.drawio` 里被复用、文字块不能。要让它生效得先让 `Callout` 可被
+`applyLayout` 寻址，并给 `codegen` 加一行 `Xy`/`Size` 的写回，两件都不在最小改动范围内。
 
 ### 压缩态（能力 8，非可选）
 
@@ -270,8 +349,10 @@ JS 无 `m` 标志的 `$` 只匹配字符串末尾。对 `.strip()` 过的行没�
 Python 3 的 `\w` **默认 Unicode 感知**（能匹配中文、全角字符）；
 JS 的 `\w` 只有 `[A-Za-z0-9_]`。
 
-本项目里所有需要匹配的标识符都是 ASCII，所以没踩到；但**如果哪天给标识符加
-Unicode 支持，两边会立刻分叉**。需要时显式写 `[\p{L}\p{N}_]` 加 `u` 标志。
+本项目已经踩到了：`csparse.ts` 为了让中文信号名/组件方法名出图，显式写
+`[\p{L}_][\p{L}\p{N}_]*` 加 `u`，并整段跳过 `record` 声明。Python 与 .NET 的 C# 前端
+仍只认 ASCII，因此**中文标识符目前是 TS 独有**（见 README 的「与 Python 版的已知差异」）。
+ASCII 源码三版仍然一致。
 
 ### 5.7 字符串排序：码点 vs UTF-16 码元
 
@@ -445,6 +526,22 @@ Set-Content  -LiteralPath $p -Value $t -NoNewline -Encoding utf8
 - **`candidates()` 里各候选的先后**：同长度时取先出现的，顺序即 tie-break。
 - **`applyLayout` 里 `autoWaypoints` 的比较**：它区分"生成器写的拐点"和"人拖的拐点"。
   去掉这一步，`--layout-from` 复用一次就会把自动拐点固化死。
+- **`EDGE_STYLE` 的默认值（`edgeStyle=orthogonalEdgeStyle;rounded=1;…`）**：它不只是个样式串，
+  而是 TS / Python / .NET **共享契约**的一部分 —— 每份金样的 `expected.drawio` 里都写死了它和
+  `<Array as="points">`，改默认值会让 18/18 一致性当场全红。要换走法就**加开关**（现成的例子是
+  `--straight-edges` 与 `STRAIGHT_EDGE_STYLE`）：在 `cli.ts` 里读成布尔量，一路透传给
+  `toDrawio` / `toSvg`，默认 `false` 保证既有产物逐字节不变。换样式时有四件事必须一起做，
+  漏一件线还是弯的：清掉 `edgeStyle=orthogonalEdgeStyle`（不清，draw.io 会**自己**再算一遍
+  正交走线）、去掉 `rounded=1`（没有拐角，圆角无从谈起）、去掉 `jumpStyle=arc`/`jumpSize=6`
+  （跳弧只在布线器算拐点时才产生）、**保留 `exitX/exitY/entryX/entryY`**（它决定线从哪条边出发，
+  与走法无关；丢了它 draw.io 会自己就近挑边）。另外**只丢自动拐点，`--layout-from` 里人工画的
+  拐点要留着** —— 那是人明确放上去的东西，不该被一个样式开关悄悄吞掉。
+- **`model.pinned` 的判据**：它记的是"读回值与 build 本来会写出的值不同"的实体，
+  基准是**源码声明值，没声明才是默认布局值**，不是"与默认布局比"。基准搞错的话，源码里本来就
+  写了 `xy` 的节点每轮 sync 都会被重写一遍，`sync` 的零 diff 立刻就没了。填它的只有 `applyLayout`
+  一处（它是唯一同时握着两个数的地方），消费它的是 `codegen.ts`。注意 `cli.ts` 里
+  `applyLayout` 排在 `adoptForeign`**之前**，所以图里手画、当轮被采纳的格子永远拿不到 `pinned`
+  —— 要钉住它得先 `build` 出带 `symbolId` 的单元格再去拖。
 - **任何失败都抛错，不要吞**。压缩串解不出来、金标准找不到、类型不认识的扩展名 ——
   全部抛。这个项目的核心主张是"图是派生的、代码是事实源"，
   静默丢数据正好摧毁这个主张。

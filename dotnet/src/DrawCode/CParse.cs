@@ -52,8 +52,11 @@ internal static partial class CParse
 
     private static readonly Regex AssignRe = new(@"(?<![=!<>+\-*/%&|^])=(?!=)", RegexOptions.Compiled);
     private static readonly Regex CompoundRe = new(@"(?:\+|-|\*|/|%|&|\||\^|<<|>>)=", RegexOptions.Compiled);
-    internal static readonly Regex IdentRe = new(@"[A-Za-z_]\w*", RegexOptions.Compiled);
-    private static readonly Regex CallRe = new(@"([A-Za-z_]\w*)\s*\(", RegexOptions.Compiled);
+    // 标识符字符集必须是 Unicode：C# 编译器接受中文名字，`a5_采样值 = …` 与
+    // `测试桩.处理(…)` 里的中文名都要能被 def/use 扫到，否则信号名中文化后所有边会
+    // 静默消失。C 侧只用到其中的 ASCII 子集，行为不变。与 TS/Python 同义。
+    internal static readonly Regex IdentRe = new(@"[\p{L}_][\p{L}\p{N}_]*", RegexOptions.Compiled);
+    private static readonly Regex CallRe = new(@"([\p{L}_][\p{L}\p{N}_]*)\s*\(", RegexOptions.Compiled);
     /// <summary>
     /// <c>key="value"</c> 与裸 <c>key=value</c> **两种都会出现**：元数据带引号，而
     /// <c>dir=in</c> 不带。两种都必须认。
@@ -62,7 +65,9 @@ internal static partial class CParse
     private static readonly Regex BlockCommentRe = new(@"/\*.*?\*/", RegexOptions.Compiled | RegexOptions.Singleline);
     private static readonly Regex LineCommentRe = new(@"//[^\n]*", RegexOptions.Compiled);
     private static readonly Regex AnnotationTagRe = new(@"@(\w+)\s*(.*)$", RegexOptions.Compiled);
-    private static readonly Regex ParamRe = new(@"^(?<ctype>.+?)\s*(?<name>[A-Za-z_]\w*)$", RegexOptions.Compiled);
+    // 形参名同样要 Unicode：中文形参在 C# 侧完全合法，名字若只认 ASCII，
+    // 整个形参会从端口表里消失（TS 的 PARAM_RE 早已是 Unicode）。
+    private static readonly Regex ParamRe = new(@"^(?<ctype>.+?)\s*(?<name>[\p{L}_][\p{L}\p{N}_]*)$", RegexOptions.Compiled);
 
     /// <summary>相对项目根的路径，一律用正斜杠。</summary>
     internal static string Rel(string path, string root) =>

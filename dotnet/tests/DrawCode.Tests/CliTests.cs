@@ -115,6 +115,53 @@ public sealed class CliTests
         }
     }
 
+    /// <summary>
+    /// 回归：布尔开关后面紧跟的 token 是**输入文件**，不能当成开关的值。
+    /// 早先所有 <c>--flag</c> 都按「可能带值」解析，`build --merge dsp.h adc.h`
+    /// 会把 dsp.h 吞成 --merge 的值 —— 不报错地少画一个模块。
+    /// </summary>
+    [Fact]
+    public void BooleanFlagDoesNotSwallowTheFollowingFile()
+    {
+        var (dir, paths) = Setup("adc.h", "adc.c", "dsp.h", "dsp.c");
+        try
+        {
+            var args = new List<string> { "build", "--merge", paths[2], paths[0] };
+            args.AddRange(["--root", dir, "--out", Path.Combine(dir, "all.drawio")]);
+            Assert.Equal(0, Run([.. args]));
+
+            var xml = Fixture.Read(Path.Combine(dir, "all.drawio"));
+            // 两个模块都必须进图：dsp 模块丢了就说明 --merge 吞掉了 dsp.h。
+            Assert.Contains("adc.h::g_raw", xml, StringComparison.Ordinal);
+            Assert.Contains("dsp.h::g_coeff", xml, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// 同理：<c>--write</c> 是开关，放在位置参数前面时不能吞掉 .drawio 路径。
+    /// 若被吞，sync 会只剩一个位置参数，直接报 "needs a .drawio"。
+    /// </summary>
+    [Fact]
+    public void WriteFlagDoesNotSwallowTheDrawioPath()
+    {
+        var (dir, paths) = Setup("adc.h", "adc.c");
+        try
+        {
+            Assert.Equal(0, Run("build", paths[0], "--root", dir));
+            var drawio = Path.Combine(dir, "adc.drawio");
+            Assert.True(File.Exists(drawio));
+            Assert.Equal(0, Run("sync", "--write", drawio, paths[0], "--root", dir));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
     [Fact]
     public void HeaderAlonePullsInTheSiblingSource()
     {

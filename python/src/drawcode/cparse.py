@@ -51,8 +51,14 @@ FUNC_RE = re.compile(
 # 赋值识别：`=` 但排除 ==、!=、<=、>=、+= 等（lookaround 两头都挡住）。
 ASSIGN_RE = re.compile(r"(?<![=!<>+\-*/%&|^])=(?!=)")
 COMPOUND_RE = re.compile(r"(?:\+|-|\*|/|%|&|\||\^|<<|>>)=")
-IDENT_RE = re.compile(r"[A-Za-z_]\w*")
-CALL_RE = re.compile(r"([A-Za-z_]\w*)\s*\(")
+# 标识符字符集必须是 Unicode：C# 编译器接受中文名字，`a5_采样值 = …` 与
+# `测试桩.处理(…)` 里的中文名都要能被 def/use 扫到，否则信号名中文化后所有边会静默
+# 消失。C 侧只用到其中的 ASCII 子集，行为不变。
+#
+# Python 的 `re` 没有 `\p{L}`：`[^\W\d]` 是「`\w` 去掉数字」，即 Unicode 字母或
+# 下划线；后续用 `\w`（字母/数字/下划线）。与 TS 的 `[\p{L}_][\p{L}\p{N}_]*` 等价。
+IDENT_RE = re.compile(r"[^\W\d]\w*")
+CALL_RE = re.compile(r"([^\W\d]\w*)\s*\(")
 # `key="value"` and bare `key=value` both appear: metadata is quoted, `dir=in` is not.
 # （两种写法都必须认：元数据带引号，而 `dir=in` 是裸值。曾经只认带引号的版本，
 #   结果 `dir` 读不到、signal 判定失败、**所有信号静默消失且不报错**。改动这个
@@ -112,7 +118,9 @@ def _parse_params(text):
     out = []
     for part in text.split(","):
         part = part.strip()
-        m = re.match(r"^(?P<ctype>.+?)\s*(?P<name>[A-Za-z_]\w*)$", part)
+        # 形参名同样要 Unicode：`编码器输入 输入` 这类中文形参在 C# 侧完全合法，
+        # 名字若只认 ASCII，整个形参会从端口表里消失（TS 的 PARAM_RE 早已是 Unicode）。
+        m = re.match(r"^(?P<ctype>.+?)\s*(?P<name>[^\W\d]\w*)$", part)
         if m:
             out.append(Param(name=m.group("name"), ctype=m.group("ctype").strip()))
     return out

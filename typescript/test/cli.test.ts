@@ -14,7 +14,7 @@ import { test } from "node:test";
 import { main } from "../src/cli.ts";
 import { parseProject } from "../src/cparse.ts";
 import { toDrawio } from "../src/drawio.ts";
-import { extractShape } from "./helpers.ts";
+import { CASES_DIR, extractShape, mustRead } from "./helpers.ts";
 import { EXAMPLES_C } from "./helpers.ts";
 
 const ADCS = ["adc.h", "adc.c"];
@@ -169,4 +169,21 @@ test("path: nested containers are emitted with a parent chain", () => {
   // 没标 path 的落在自己的模块容器 `x` 里，不会被塞进 adc
   assert.equal(byPath.get("x.h::g_plain"), "x");
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test("dump-ir: canonical JSON matches the golden", () => {
+  // 三版 CLI 的公开面必须一致：.NET 有 dump-ir，TS/Python 也必须有。
+  // 产物口径与 tools/dump_ir.py 相同 —— 逐字节比对金标准，而不是只比字段。
+  const tmp = fixture();
+  try {
+    const out = path.join(tmp, "ir.json");
+    const files = [...ADCS, ...DSPS].map((f) => path.join(tmp, f));
+    assert.equal(main(["dump-ir", ...files, "--root", tmp, "--out", out]), 0);
+    assert.equal(
+      fs.readFileSync(out, "utf8"),
+      mustRead(path.join(CASES_DIR, "small-c", "expected.ir.json")),
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
