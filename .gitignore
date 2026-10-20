@@ -16,9 +16,15 @@ dist/
 # Node
 node_modules/
 
-# .NET
-bin/
-obj/
+# .NET —— 作用域必须限定在 dotnet/ 下。
+#
+# 这两条早先是裸的 `bin/` 与 `obj/`，于是 **typescript/bin/ 被一起吞了**：
+# TS 包的入口 typescript/bin/drawcode.ts 从建立起就进不了仓库，而 package.json
+# 的 bin 字段、files 列表、tsconfig 的 include、npm run drawcode、两份 README
+# 都指着它 —— 一条从未存在过的路径。测试调的是 src/cli.ts 的 main()，
+# 所以没有任何一条测试能照出这件事。
+dotnet/**/bin/
+dotnet/**/obj/
 *.user
 *.suo
 .tmp/
