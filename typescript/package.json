@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "drawcode (TypeScript) — source code is the single source of truth; the diagram is a derived view. Reference-equal to python/src/drawcode.",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "engines": {
     "node": ">=22.6"
   },
