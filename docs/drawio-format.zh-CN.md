@@ -226,7 +226,7 @@ urllib.parse.unquote(zlib.decompress(base64.b64decode(data), -15).decode("utf-8"
 | `<diagram>` 文本为空 | 跳过 —— 有些文件带着占位 diagram |
 | `<diagram>` 文本解不开 | **抛 `ValueError`** |
 
-最后一行是值得明说的设计决策：返回空布局与「这张图确实没有布局」无法区分，调用方会用默认值覆盖掉手工排版。抛错让损坏在失败点就可见。`conformance.md` 把这条列为必需能力而不是加分项，并要求三个实现行为一致。
+最后一行是值得明说的设计决策：返回空布局与「这张图确实没有布局」无法区分，调用方会用默认值覆盖掉手工排版。抛错让损坏在失败点就可见。`conformance.md` 把这条列为必需能力而不是加分项。
 
 因为两种形态展开成同一棵树，`read_layout` 对形态无感：同一个文件由 drawcode 生成、再被 draw.io 另存，读出来的 nodes、edges、attrs 完全相同。这条相等性是对着一个 draw.io 压缩过的金标准文件断言的。
 
@@ -263,4 +263,4 @@ urllib.parse.unquote(zlib.decompress(base64.b64decode(data), -15).decode("utf-8"
 - [annotations.md](annotations.md) — `<object>` 上那些属性从哪来
 - [architecture.md](architecture.md) — 为什么只回写声明层
 - [`conformance.md`](conformance.md) — 比较层级与归一化规则
-- [`tools/render/README.md`](../tools/render/README.md) — 不装 draw.io 也能把 `.drawio` 渲成图片
+- [参与贡献 § 离线渲染](contributing.zh-CN.md#离线渲染) — 不装 draw.io 也能把 `.drawio` 渲成图片

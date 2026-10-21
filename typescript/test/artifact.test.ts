@@ -31,7 +31,7 @@ const METADATA_TOOL = path.resolve(
   "drawcode-metadata",
   "bin",
   "Release",
-  "net8.0",
+  "net10.0",
   "drawcode-metadata.dll",
 );
 
@@ -114,9 +114,9 @@ test("read: missing file rejects instead of faking a model", async () => {
 /**
  * 真实产物验收：路径由 `DRAWCODE_SAMPLE_DLL` 指定，未设置就跳过。
  *
- * 为什么不把样本 dll 入库：它有几个 MB，且是「样本工程」工程随源码变化重新生成的产物，
+ * 为什么不把样本 dll 入库：它有几个 MB，且会随样本工程的源码变化重新生成，
  * 入库后必然与源码漂移。这里只锁住**关键不变量**（信号数、每信号一读一写、零悬空），
- * 具体每条边的语义由 `样本工程/check-graph.mjs` 用源码 IR 对照。
+ * 具体每条边的语义由样本工程自己的脚本用源码 IR 对照。
  */
 test("pe: 真实样本的读写边与源码解析结果一致", async (t) => {
   const sample = process.env["DRAWCODE_SAMPLE_DLL"] ?? "";
@@ -134,10 +134,15 @@ test("pe: 真实样本的读写边与源码解析结果一致", async (t) => {
   assert.equal(model.edges.filter((e) => e.kind === "write").length, 31);
 
   // 组件方法的 path 是 `命名空间/类型`；测试与模拟代码不在验收范围内。
-  const components = model.funcs.filter((f) => f.path.startsWith("sample-app/"));
-  assert.equal(components.length, 22);
-  for (const component of components) {
-    assert.deepEqual(component.calls, [], `${component.id} 不应产生调用边`);
+  // 前缀由 `DRAWCODE_SAMPLE_PREFIX` 给出（例如 `Sample.App/`），未设置时跳过这段，
+  // 只校验与具体样本无关的不变量。
+  const componentPrefix = process.env["DRAWCODE_SAMPLE_PREFIX"] ?? "";
+  if (componentPrefix.length > 0) {
+    const components = model.funcs.filter((f) => f.path.startsWith(componentPrefix));
+    assert.equal(components.length, 22);
+    for (const component of components) {
+      assert.deepEqual(component.calls, [], `${component.id} 不应产生调用边`);
+    }
   }
 
   // 每个信号恰好被写一次、读一次 —— 端口数的机器证据。

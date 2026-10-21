@@ -133,12 +133,12 @@ No mezcles los separadores: `xy` lleva una coma y `size` lleva una **`x` minúsc
 
 ### Dónde surten efecto las claves de geometría
 
-Las tres claves las lee ahora **cada frontal de cada implementación**: en `.c` y en `.cs`, sobre señales y sobre funciones. Las versiones anteriores leían `xy`/`size` solo en la rama de funciones, solo en algunos frontales, y nunca leían `style`; esas lagunas están cerradas en las tres implementaciones. Las reglas son idénticas en todas partes:
+Las tres claves las lee ahora **cada frontal**: en `.c` y en `.cs`, sobre señales y sobre funciones. Las versiones anteriores leían `xy`/`size` solo en la rama de funciones, solo en algunos frontales, y nunca leían `style`; esas lagunas están cerradas. Las reglas son idénticas en todas partes:
 
 - una clave ausente o una cadena vacía deja intacto el valor por defecto de la entidad;
 - un valor malformado **no** provoca un error: se convierte en `NaN`, y un nodo con geometría `NaN` es invisible en draw.io;
 - `xy` se divide por coma y `size` por una `x` minúscula (el valor se pasa a minúsculas antes de dividirlo, así que `180X72` también se acepta);
-- la conversión sigue el `Number()` de JavaScript, no `float()` de Python ni `double.Parse` de .NET — las tres cadenas en las que difieren (`"1_0"`, `"infinity"`, `"0x10"`) están cubiertas por pruebas de paridad.
+- la conversión sigue el `Number()` de JavaScript — las tres cadenas en las que difiere de un análisis tipo `strtod` (`"1_0"`, `"infinity"`, `"0x10"`) están cubiertas por pruebas.
 
 `sync` también reescribe el par en las entidades cuya geometría del diagrama difiere de lo que `build` habría escrito — véase [Reescritura](#reescritura). Como todas las implementaciones ignoran las claves desconocidas en lugar de provocar un error, estos comportamientos los fijan pruebas unitarias dedicadas y no los casos dorados: `expected.ir.json` no registra coordenadas a propósito, así que el L1 no puede detectar una regresión.
 
@@ -276,7 +276,7 @@ Estas reglas no necesitan anotación porque se deducen de la estructura del cód
 | `style` | **nunca** — es una clave solo de entrada, como `clientX` en un elemento |
 | **cuerpo** de la función | **nunca** — esta es la restricción de diseño, no una carencia |
 
-Las tres implementaciones reescriben el par, y las tres fusionan a **nivel de parámetro**: un `Style` escrito a mano, un `Unit="LSB"` compacto o una línea `[Device]` sobreviven intactos, y solo se reescriben las claves cuyo valor cambió de verdad. Así, `sync` hace la ida y vuelta de un diagrama reordenado con cualquiera de las tres, no solo con TypeScript.
+`sync` reescribe el par y fusiona a **nivel de parámetro**: un `Style` escrito a mano, un `Unit="LSB"` compacto o una línea `[Device]` sobreviven intactos, y solo se reescriben las claves cuyo valor cambió de verdad. Así, la ida y vuelta de un diagrama reordenado no perturba las anotaciones escritas a mano.
 
 La fila de geometría es condicional, y la condición es lo que mantiene honesto a `sync`. En todo el repositorio, `applyLayout` es el único sitio que sostiene los dos números a la vez — lo que el diagrama dice ahora y lo que `build` habría escrito (el `xy` que declara el propio fuente, o el diseño por defecto si no hay ninguno) — y solo registra las entidades en las que ambos difieren. **Esas diferencias son la única geometría que `sync` escribe jamás.** Así, un proyecto que nadie ha tocado produce ficheros idénticos byte a byte; un nodo arrastrado solo gana una clave; y un nodo que el fuente ya fijaba conserva su valor original, en lugar de reescribirse al mismo número con otra grafía.
 

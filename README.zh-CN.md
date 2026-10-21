@@ -4,10 +4,10 @@
 
 > 把带注解的 C / C# 源码变成一张可编辑的 
 > [draw.io](https://www.drawio.com/) 数据流图 —— 
-> 并把你手工排好的布局读回代码。三个独立实现：Python、TypeScript、.NET 10。
+> 并把你手工排好的布局读回代码。
 
-可在 Windows、Linux 与 macOS 上运行。任何实现都没有第三方运行时依赖：
-Python 3.10+、Node 22.6+，或 .NET 10（任选一个）。
+可在 Windows、Linux 与 macOS 上运行。CLI 没有第三方运行时依赖：需要 Node 22.6+。
+只有在 `inspect` 读取 PE/CLI `.dll` 时才需要 .NET 10 运行时，由随附的 sidecar 承担。
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -26,48 +26,31 @@ Python 3.10+、Node 22.6+，或 .NET 10（任选一个）。
 - **反向是刻意收窄的。** 只有*声明层*会被回写 —— `SIGNAL_*` 宏语句与注解属性。
   **函数体逻辑永不改写**，这是设计使然。
 - **幂等。** 构建 → 编辑 → sync → 构建，产生零代码变更。这一点由测试断言，而不是假定。
-- **三个实现，一份规格。** Python、
-  TypeScript 与 .NET 对同一输入产生可比对到字节的几何，
-  并由共享金标准校验 —— 所以 
-  [`docs/benchmark.md`](docs/benchmark.md) 里的性能比较是同类比同类。
+- **金标准钉住契约。** IR 与几何都与已提交的金标准用例逐字节比对，
+  所以解析器或路由的一处改动会显示成一条可审阅的 diff，而不是悄悄漂移。
 
 ## 快速开始
 
 ```bash
 git clone <this-repo> && cd drawcode
 
-# Python - no install, run straight from the source tree
-export PYTHONPATH=python/src           # Windows: $env:PYTHONPATH = "python/src"
-python -m drawcode.cli build \
+# 无需安装：Node >= 22.6 直接运行 .ts 入口
+node typescript/bin/drawcode.ts build \
     examples/small/c/adc.h examples/small/c/adc.c \
     examples/small/c/dsp.h examples/small/c/dsp.c \
     --root examples/small/c \
     --out out/flow.drawio --svg out/flow.svg
 
-# TypeScript - no install, Node >= 22.6 runs the .ts entry point directly
-node typescript/bin/drawcode.ts build \
-    examples/small/c/adc.h examples/small/c/adc.c \
-    examples/small/c/dsp.h examples/small/c/dsp.c \
-    --root examples/small/c --out out/flow-ts.drawio
-
-# .NET 10 - build once, then run the produced dll
-dotnet build dotnet/DrawCode.slnx -c Release
-dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll build \
-    examples/small/c/adc.h examples/small/c/adc.c \
-    examples/small/c/dsp.h examples/small/c/dsp.c \
-    --root examples/small/c --out out/flow-net.drawio
-
-# Open a .drawio in draw.io, rearrange the nodes, save, then reuse that layout
-# and write the annotations back into your source:
-python -m drawcode.cli build ... --layout-from out/flow.drawio --out out/flow.drawio
-python -m drawcode.cli sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c                    # dry run: reports what would change
-python -m drawcode.cli sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --write            # actually write
+# 在 draw.io 里打开这张 .drawio，拖动节点排好版，保存，然后复用这份布局
+# 并把注解回写进源码：
+node typescript/bin/drawcode.ts build ... --layout-from out/flow.drawio --out out/flow.drawio
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+    --root examples/small/c                    # 空跑：只报告会改什么
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+    --root examples/small/c --write            # 真正写入
 ```
 
-三种实现对同一份输入产出的 `.drawio` **逐字节相同**。
-等价性对照表与各语言的测试命令见
+构建命令、仓库地图与测试命令见
 [`docs/implementations.md`](docs/implementations.md)。
 
 ## 命令行用法
@@ -83,11 +66,30 @@ drawcode inspect <artifact> [--out FILE] [--infer-edges]
 | :--- | :--- |
 | `build` | 解析源码 → 构建 IR → 写出 `.drawio`。`--layout-from` 复用既有图的人工布局。`--svg` 额外产出一份只读预览，与 `.drawio` 共享同一套坐标。 |
 | `sync` | 读取 `.drawio` → 应用布局与注解属性 → 把**声明层**回写到源码。不加 `--write` 时是空跑。 |
-| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`），输出规范 JSON。不加载、不执行目标程序；仅 TypeScript 实现提供，不参与三实现一致性比对。 |
+| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`），输出规范 JSON。不加载、不执行目标程序；PE `.dll` 由随附的 .NET sidecar 读取，ELF 与 `ar` 归档在进程内解析。 |
 
 `--inline` 把「一写一读」的信号折叠成设备直连边，`--cards` 把带 `asset` 的函数画成图片卡片，
-`--no-rw-labels` 去掉边上的 `read`/`write`，`--straight-edges` 用直线替代正交布线。三份实现
-接受同名同义的开关；不带开关时产物与旧行为逐字节相同。
+`--no-rw-labels` 去掉边上的 `read`/`write`，`--straight-edges` 用直线替代正交布线。
+不带开关时产物与默认行为逐字节相同。
+
+## 浏览编译产物
+
+`drawcode inspect` 同时驱动一个只读的 VS Code 视图：打开 `.dll`、`.so`、`.out`、`.a` 或 `.o`，
+自定义编辑器会显示产物里编译进去的内容：
+
+- **概览** —— 格式、架构、实体计数与读取诊断。
+- **模块交联** —— 模块、类型、信号与函数的虚拟化树；勾选信号后，左侧连线栏从写入行连到读取行。
+- **持久化数据** —— 标了 `Store` 的类型以 ER 表展示，含字段类型与嵌套结构链接。
+
+![模块交联：勾选端口后，连线从写入行连到读取行](docs/assets/artifact-viewer.png)
+
+*模块交联：勾选端口后连线从写入行连到读取行；结构体信号在右侧 groupbox 展开字段。*
+
+| 持久化数据（`Store` 类型以 ER 表展示） | C 产物按标签分组 |
+| :---: | :---: |
+| ![持久化数据视图](docs/assets/artifact-viewer-store.png) | ![C 产物按标签分组](docs/assets/artifact-viewer-c.png) |
+
+前提与设置见 [`docs/vscode-extension.md`](docs/vscode-extension.md)。
 
 ## 核心概念
 
@@ -116,24 +118,22 @@ drawcode inspect <artifact> [--out FILE] [--infer-edges]
 | 为什么设计是这个形状 | [`docs/architecture.md`](docs/architecture.md) |
 | 每一个注解键，含类型与默认值 | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` 映射、路由规则、坐标系语义 | [`docs/drawio-format.md`](docs/drawio-format.md) |
-| 实测性能，三个实现 | [`docs/benchmark.md`](docs/benchmark.md) |
-| 三个实现怎么被约束到同一份规格 | [`docs/conformance.md`](docs/conformance.md) |
+| 金标准钉住了什么、为什么冻结 | [`docs/conformance.md`](docs/conformance.md) |
+| 在 VS Code 里浏览编译产物 | [`docs/vscode-extension.md`](docs/vscode-extension.md) |
+| 让自己的 C / C# 构建产物可读 | [`docs/templates.md`](docs/templates.md) |
+| 跑一下仓库自带的示例工程 | [`docs/examples.md`](docs/examples.md) |
 | 构建、测试、加一门语言 | [`docs/contributing.md`](docs/contributing.md) |
-| 自己实现这套能力 | [`python/SKILL.md`](python/SKILL.md)、[`typescript/SKILL.md`](typescript/SKILL.md)、[`dotnet/SKILL.md`](dotnet/SKILL.md) |
+| 自己实现这套能力 | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
 ## 开发
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 145 tests
-cd typescript && npm test
-cd dotnet && dotnet test
-
-pwsh bench/run.ps1                                        # three-language benchmark
+cd typescript && node --test                       # CLI、解析器、IR、布局、一致性
+cd editors/vscode && node --test test/*.test.mjs   # 扩展测试（不依赖扩展宿主）
 ```
 
-实测环境：Windows 11 (10.0.22621)，
-Python 3.14.6，Node 24.16.0，
-.NET SDK 10.0.203。
+`tools/drawcode-metadata/` 下的 PE sidecar 是纯 .NET 10，只在 `inspect` 读 `.dll` 时才构建/运行；
+工具链其余部分只需要 Node 22.6+。
 
 ## 实测验证
 
@@ -141,23 +141,29 @@ Python 3.14.6，Node 24.16.0，
 
 | 主张 | 如何测量 | 结果 |
 | :--- | :--- | :--- |
-| Python 实现是正确的 | `python -m unittest discover -s tests -t .` | **145 个测试，0 失败，0 跳过** |
+| TypeScript 实现是正确的 | `cd typescript && node --test` | **211 个测试，0 失败，3 跳过** |
+| 扩展测试 | `cd editors/vscode && node --test test/*.test.mjs` | **79 个测试，0 失败** |
 | 压缩态 `.drawio` 被正确读取 | 读回一个 draw.io 压缩过的金标准文件 | **nodes=6, edges=6, attrs=6** —— 与纯文本形态完全相同 |
-| 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛 `ValueError` |
-| 生成的 `.drawio` 符合 schema | 用 `lxml` XMLSchema 对着 `tools/xsd/mxfile.xsd` 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |
+| 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛错（绝不返回空布局） |
+| 生成的 `.drawio` 符合 schema | 对着 `tools/xsd/mxfile.xsd` 做 XSD 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |
 | 往返幂等 | 构建 → sync → 构建，比较 | **第二次 sync 零改动** |
-| 布局开销 | `bench/run.ps1`，5/10/20/40/80 个模块 | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s —— **超线性，见下** |
-| 解析开销，同批运行 | 同上 | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms —— 线性 |
-| 三个实现一致 | `tests/golden/*/expected.{ir.json,drawio}` | 见 [`docs/benchmark.md`](docs/benchmark.md) |
+| 金标准 IR 被精确复现 | `dump-ir` 与 `tools/golden/*/expected.ir.json` 逐字节比对 | **两个金标准用例均完全一致** |
 
-布局那些数字才是有意思的结果：
+2026-10 基准测试得到的性能数字（布局随模块数呈二次增长、解析线性）是在已退役的 Python
+参考实现上测的；这里保留它们，是因为算法相同，但明确标注为历史数据而非当前数据。
+
+| 主张 | 如何测量 | 结果 |
+| :--- | :--- | :--- |
+| 布局开销（历史，Python） | 5/10/20/40/80 个模块 | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s —— **超线性** |
+| 解析开销（历史，Python） | 同上 | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms —— 线性 |
+
 **解析是线性扩展的，而布局是二次的。** 路由每条边都要拿候选路径去试所有其它节点，
 所以一个 80 模块的工程会在布局上花 95 秒，而解析只花 53 毫秒。这一点是作为特征写出来的，
-而不是当作舍入误差藏起来 —— 基准文档记录了时间究竟花在哪。
+而不是当作舍入误差藏起来。
 
 ## 已知限制（诚实列出）
 
-- **布局是 O(n²)**，所以大工程慢。目前没有使用任何空间索引。这一点对三个实现同等适用。
+- **布局是 O(n²)**，所以大工程慢。目前没有使用任何空间索引。
 - **离线渲染器画不出 `jumpStyle=arc` 跳线。** `jumpStyle` 是 
   draw.io 的扩展，开源 mxGraph 核心没有。生成的文件把它配置正确，
   draw.io 客户端也会照做，但 `tools/render/` 不会显示跳线。
@@ -168,17 +174,17 @@ Python 3.14.6，Node 24.16.0，
   报告的 `offsetWidth = 0`，所以字宽是近似值。文字本身渲染正确（SVG 定位不依赖该测量）；
   标签的*避让*可能不准。
 - **SVG 预览不共享 `.drawio` 的边路由。** 节点位置是共享的（两者都调用同一套默认布局），
-  但 `svg.py` 是中心连中心画边，而 `to_drawio` 会跑完整的锚点选择与避障。
+  但 `svg.ts` 是中心连中心画边，而 `to_drawio` 会跑完整的锚点选择与避障。
   因此 SVG 的边会穿过 `.drawio` 绕开的节点形状。把 SVG 当作结构性速读，而不是忠实预览。
   修好它需要把 `to_drawio` 重构出共享的边几何函数。
 - **函数体永不回写。** 这是设计约束，不是缺口。
 - **混合语言的单张图不做符号解析。** C 与 C# 的模型可以合并，但跨语言引用同名符号不会被解析。
 - **多页 / 多视图、图层与标签过滤没有接到 CLI。**
-- **跨实现的几何相等要求移植同一套算法。** 这正是重点 —— 但也意味着所谓「换一种优化方式」的实现，
-  只允许改*算得多快*，永远不能改*算出什么*。
+- **几何被冻结在金标准上。** 更快的布局算法可以接受，但只能改*算得多快*，
+  不能改*算出什么* —— 否则每个金标准用例都会 diff，手工布局也不再对得上。
 
 ## 许可
 
 [MIT](LICENSE)。
 随仓库附带的第三方材料列在 
-[`tools/xsd/README.md`](tools/xsd/README.md)。
+[`tools/xsd/NOTICE.md`](tools/xsd/NOTICE.md)。

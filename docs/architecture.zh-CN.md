@@ -58,43 +58,42 @@ devices.json      device master data
 
 ```
                     ┌──────────────────────────────┐
-   source files ───▶│ cparse.py / csparse.py       │  language front ends
+   source files ───▶│ cparse.ts / csparse.ts       │  language front ends
                     │  (one per source language)   │
                     └───────────────┬──────────────┘
                                     ▼
                     ┌──────────────────────────────┐
-                    │ model.py                     │  IR (in memory only)
+                    │ model.ts                     │  IR (in memory only)
                     │  Signal / Func / Edge / ...  │
                     └───────────────┬──────────────┘
                                     ▼
         ┌───────────────────────────┼───────────────────────────┐
         ▼                           ▼                           ▼
 ┌───────────────┐         ┌──────────────────┐        ┌────────────────┐
-│ drawio.py     │         │ svg.py           │        │ codegen.py     │
+│ drawio.ts     │         │ svg.ts           │        │ codegen.ts     │
 │ IR ↔ .drawio  │         │ IR → SVG preview │        │ IR → code      │
 │ layout+route  │         │ (node layout     │        │ (declaration   │
 │               │         │  only, see note) │        │  layer only)   │
 └───────────────┘         └──────────────────┘        └────────────────┘
         ▲                                                      │
-        └──────────────────── cli.py ──────────────────────────┘
+        └──────────────────── cli.ts ──────────────────────────┘
                           build / sync
 ```
 
 | 模块 | 负责 | **不**负责 |
 | :--- | :--- | :--- |
-| `model.py` | IR 类型与边的派生 | 任何 I/O |
-| `cparse.py` | C 语法 → IR | 排版、绘制 |
-| `csparse.py` | C# 语法 → IR | 排版、绘制 |
-| `parse.py` | 扩展名分派、多语言合并 | 语法细节 |
-| `drawio.py` | 排版、路由、`.drawio` 读写 | 源码语法 |
-| `svg.py` | SVG 预览 | 路由（见下） |
-| `codegen.py` | 声明层回写 | 函数体（永不） |
-| `cli.py` | 参数处理、文件 I/O | 任何算法 |
+| `model.ts` | IR 类型与边的派生 | 任何 I/O |
+| `cparse.ts` | C 语法 → IR | 排版、绘制 |
+| `csparse.ts` | C# 语法 → IR | 排版、绘制 |
+| `parse.ts` | 扩展名分派、多语言合并 | 语法细节 |
+| `drawio.ts` | 排版、路由、`.drawio` 读写 | 源码语法 |
+| `svg.ts` | SVG 预览 | 路由（见下） |
+| `codegen.ts` | 声明层回写 | 函数体（永不） |
+| `cli.ts` | 参数处理、文件 I/O | 任何算法 |
 
-**让它可维护的那条规则**：`drawio.py` 里**没有语言分支**。图
-是 IR 的图像，而 IR 与语言无关。如果 `drawio.py` 里出现了语言判断，
-三套实现就无法再共享同一份排版规格，
-基准测试也就失去意义了。
+**让它可维护的那条规则**：`drawio.ts` 里**没有语言分支**。图
+是 IR 的图像，而 IR 与语言无关。渲染器里一旦出现语言判断，
+几何金标准实际上就变成了两份契约共用同一个名字。
 
 ## 数据流：`build`
 
@@ -148,27 +147,26 @@ sync_source(path, model, rel)  write per file
 把反向限制在声明层，使这个操作可证明安全：它只能
 触及图真正完整表示的那些行。
 
-## 三套实现，一份规格
+## 一套实现，一份冻结的几何契约
 
-Python、TypeScript 和 .NET 10 各自以自己的习惯独立实现了这套架构。
-它们由 [`conformance.md`](conformance.md) 和 `tests/golden/`
-下的金标准用例约束到输出完全相同。
+只有一套实现：TypeScript，由 `tools/golden/` 下的金标准逐字节约束
+（[`conformance.md`](conformance.md)）。2026-10-21 之前还有 Python 与 .NET 两套实现，
+与同一批金标准比对；TypeScript 的输出被证明逐字节相同后，它们退役并留在 git 历史中。
 
 诚实的推论：**优化可以改变计算得多快，永不改变计算什么。**
 加速障碍物查询的空间索引没问题；产出更漂亮边的更聪明路由器不行，
-因为它破坏了可比性。正是这条约束让
-[benchmark.md](benchmark.zh-CN.md) 有意义。
+因为它会让每个金标准、以及按旧几何记录下来的人工布局全部失效。
 
 ### 已知分歧：SVG 预览
 
-`svg.py` 与 `drawio.py` 共享**节点**排版（两者都调 `_assign_default_positions`），
+`svg.ts` 与 `drawio.ts` 共享**节点**排版（两者都调 `_assign_default_positions`），
 但**不共享边路由器**。它把边画成中心到中心，所以会明显穿过那些
 `.drawio` 会绕开的节点形状。SVG 是结构性读取，不是忠实预览。要提供真正的
-路由，需要重构 `to_drawio`，把边几何暴露成共享函数；两套
-实现目前都有意复刻这个简化行为。
+路由，需要重构 `to_drawio`，把边几何暴露成共享函数；在此之前，
+这个简化行为是有意保留的。
 
 ## 相关
 
 - [annotations.md](annotations.zh-CN.md) —— 承载方向与元数据的注解键
 - [drawio-format.md](drawio-format.zh-CN.md) —— 映射规则、坐标、路由、压缩
-- [../conformance.md](conformance.md) —— 三套实现如何被约束在一起
+- [../conformance.md](conformance.md) —— 金标准钉住了什么、哪些行为它照不到

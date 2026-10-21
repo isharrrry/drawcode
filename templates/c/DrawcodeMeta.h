@@ -1,6 +1,9 @@
 /*
  * drawcode 元数据模板（C）。
  *
+ * 用法、tag 表、段保留（--gc-sections / LTO）与定长限制见 docs/templates.md 的
+ * 「C template (ELF)」一节；本文件只保留接口本身。
+ *
  * 原理：把声明写成**定长、无指针的 POD 结构体**，用
  * `__attribute__((used, section("dc_meta_entries")))` 放进独立段。
  * 读取器只要按固定 200 字节切片就能读出名字、类型、偏移与读写关系，

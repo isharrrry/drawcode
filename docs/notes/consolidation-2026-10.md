@@ -116,3 +116,84 @@ node typescript/src/cli.ts build examples/small/cs/*.cs --root examples/small/cs
 dotnet dotnet/src/DrawCode/bin/Debug/net10.0/DrawCode.dll build examples/small/cs/*.cs --root examples/small/cs --merge --out /tmp/dn.drawio
 sha256sum /tmp/{py,ts,dn}.drawio
 ```
+
+> 上面的命令是审计当时的记录，Python/.NET 已于同日稍后退役，现不可直接运行；历史提交里仍可复现。
+
+## 7. 决议与执行（2026-10-21）
+
+用户拍板方案 **C：只保留 TypeScript 实现**。判断依据（基于本文第 1 节的测量）：
+
+- 只有 TS 具备 VS Code 扩展与 `inspect`（PE/ELF/ar 产物读取），Python/.NET 均无；
+- 三条源码管线功能重合，Python 是参考实现、.NET 是独立对照，二者不承载独有产品能力；
+- TS 的 `dump-ir` 与 `build` 已对 `tests/golden/` 的两个金标准**逐字节**复现，参考实现退役后契约仍被钉住。
+
+执行口径（用户原话：「不要删git历史，删工作区即可」）：
+
+| 动作 | 对象 | 结果 |
+| :--- | :--- | :--- |
+| 移出工作区 | `python/`、`dotnet/`、`bench/`、`examples/large/`、`tools/dump_ir.py`、`typescript/tools/make-fixtures.py`、`docs/benchmark.*` | 移到 `C:\Users\links\AppData\Local\Temp\drawcode-retired-20261021\`，需要时原路移回 |
+| 保留 | git 索引与历史 | 未做 `git rm`，提交历史完整；`431a340` 是退役前的最后一个功能提交 |
+| 代码迁移 | `python/tests/test_drawio.py::TestHandDrawnDiagram` | 等价测试迁入 `typescript/test/cli.test.ts` |
+| 文档改为单实现事实 | `README*`、`docs/index*`、`docs/implementations*`、`docs/contributing*`、`docs/conformance.md`、`docs/architecture*`、`docs/annotations*`、`docs/drawio-format*`、`docs/artifact-format.md`、`examples/README.md`、`typescript/README.md`、`typescript/SKILL.md` | 已完成；西语过时页标 `status: outdated` 并指向英文版 |
+| 历史性能数据 | 布局二次、解析线性的测量 | 保留在 `README.md` 的「Measured verification」并明确标为历史（Python 测） |
+
+`docs/benchmark.*` 删除后，`README*` 中指向它的链接已全部移除；`examples/large/` 的生成脚本一并退役，
+5/10/20/40/80 模块的成本表只在 README 里作为历史数据保留。
+
+**未跟进的部分（刻意）**：源码注释中大量「对等 Python `xxx.py`」是逐函数移植的出处说明，
+作为历史注记保留；它们不构成运行依赖，也不指向现存路径。
+
+## 8. 目录边界（2026-10-21 执行）
+
+> **已被第 9 节取代**：同日稍后用户改判 —— `tests/golden/` 移入 `tools/`，`tests/` 删除，
+> 非根目录的 README 全部拆解。下表保留为当时的决策记录。
+
+用户确认方案 A：只做零路径变更的边界说明，不改目录名。
+
+| 目录 | 角色 | 处置 |
+| :--- | :--- | :--- |
+| `tests/golden/` | 跨实现的契约夹具（无测试代码） | 留在根；新增 `tests/README.md` 说明 |
+| `typescript/test/` | 实现测试代码 | 不动 |
+| `typescript/tools/` | `make-fixtures.py` 退役后的空壳 | 删除（git 不跟踪空目录） |
+| `tools/drawcode-metadata/` | .NET 8 sidecar，VSIX 打包引用 | 留根；新增 `tools/README.md` 说明 |
+| `tools/xsd/`、`tools/render/` | L4 契约、离线渲染工具 | 留 |
+| `typescript/README.md` | 与 `docs/implementations*` 重叠 | 收缩为包级入口；独有内容迁入 docs |
+
+未采纳方案 B（`tests/` → `spec/`）：48 处文档引用、`CASES_DIR` 与 `.gitignore` 的改名成本，
+与当前单实现规模不相称。若将来出现第二实现，再考虑。
+
+## 9. 目录再收敛与 README 拆解（2026-10-21 晚，取代第 8 节）
+
+用户原话：「golden/ 挪 tools吧，空目录删了，我就是不想要那么多readme……这些readme除了根目录的
+全拆到合适的地方」。执行口径不变：只删工作区，不回写 git 历史。
+
+### 9.1 金标准移位
+
+| 动作 | 对象 | 连带改动 |
+| :--- | :--- | :--- |
+| 移动 | `tests/golden/` → `tools/golden/` | `typescript/test/helpers.ts` 的 `CASES_DIR`；`.gitignore` 两条 C# fixture 产物路径 |
+| 删除 | 空目录 `tests/` | 无代码引用（测试代码一直在 `typescript/test/`） |
+| 留根 | `tools/drawcode-metadata/`、`tools/xsd/`、`tools/render/`、`tools/publish-metadata-tool.mjs` | 见 9.3 的定位说明 |
+
+`small-cs/obj/` 被 MSBuild 占用无法移动，作为可重建的中间产物删除（`dotnet build tools/golden/small-cs` 恢复）；
+`bin/`（含验收用 `small-cs.dll`）随目录移走。
+
+### 9.2 README 处置：根目录之外清零
+
+| 原文件 | 去处 |
+| :--- | :--- |
+| `tests/README.md`、`tools/README.md` | 删除；内容并入 `docs/contributing.md` 的仓库地图与 `tools/` 定位段 |
+| `typescript/README.md` | 删除；内容与 `docs/implementations*` 重叠，`typescript/package.json` 的 `files` 去掉该项 |
+| `examples/README.md`、`examples/medium/README.md`、`examples/plain/README.md` | 合并为 `docs/examples.md` |
+| `templates/README.md`、`templates/c/README.md`、`templates/csharp/README.md` | 合并为 `docs/templates.md`（中文；稳定锚点 `#c-template-elf` / `#c-template-net`，两个头文件里加了指向它的注释） |
+| `tools/render/README.md` | 用法并入 `docs/contributing.md` §Offline rendering；五个失败记录本就在 `docs/notes/drawio-render-pitfalls.md` |
+| `tools/xsd/README.md` | 改名 `tools/xsd/NOTICE.md`（它是第三方素材出处声明，不是使用说明）；顺带修正失效的 `python/tests/test_xsd.py` 路径 |
+| `editors/vscode/README.md` | 迁为 `docs/vscode-extension.md`；`package-vsix.mjs` 改读该页，去掉 frontmatter、文档索引行与「相关」小节后写成 VSIX 内的 `extension/README.md` |
+
+根目录三份 README（`README.md`、`README.zh-CN.md`、`README.es.md`）不动，链接改指上述 docs 页。
+
+### 9.3 `tools/` 的定位
+
+`tools/` 是**仓库资产，不是随包发布的产物**：不进 npm 包、不进运行时依赖图、不在测试发现路径上。
+两个例外随产品走 —— `drawcode-metadata` 被打进 VSIX，`golden/` 被测试套件读取。
+这句话写进了 `docs/contributing*.md` 的仓库地图，作为今后新增 `tools/` 子目录的判据。

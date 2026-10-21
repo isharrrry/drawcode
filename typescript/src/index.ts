@@ -2,7 +2,8 @@
  * drawcode —— TypeScript 实现。
  *
  * 源码是语义的唯一事实源；`.drawio` 是派生产物兼人工排版载体。
- * 本实现与 `python/src/drawcode` 逐函数对应，几何结果精确相等
+ * 早期的 Python / .NET 实现已于 2026-10-21 退役（仍在 git 历史中）；
+ * 几何与 IR 现在由本目录的代码与 `../../tools/golden/` 逐字节钉住
  * （见 `../../docs/conformance.md` 的 L1–L4）。
  */
 

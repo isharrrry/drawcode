@@ -2,9 +2,10 @@
 
 **English** | [中文](README.zh-CN.md) | [Español](README.es.md)
 
-> Turn annotated C / C# source into an editable [draw.io](https://www.drawio.com/) dataflow diagram — and read your hand-made layout back into the code. Three independent implementations: Python, TypeScript, .NET 10.
+> Turn annotated C / C# source into an editable [draw.io](https://www.drawio.com/) dataflow diagram — and read your hand-made layout back into the code.
 
-Runs on Windows, Linux and macOS. No third-party runtime dependencies in any implementation: Python 3.10+, Node 22.6+, or .NET 10 (pick one).
+Runs on Windows, Linux and macOS. The CLI has no third-party runtime dependencies: Node 22.6+.
+A .NET 10 runtime is needed only to read PE/CLI `.dll` artifacts through the bundled sidecar.
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -27,47 +28,32 @@ hashes, drift detection and three-way merges to reconcile them.
   by design.
 - **Idempotent.** Build → edit → sync → build produces zero code changes. This is asserted by tests,
   not assumed.
-- **Three implementations, one specification.** Python, TypeScript and .NET produce byte-comparable
-  geometry from the same input, validated against shared golden cases — so the performance
-  comparison in [`docs/benchmark.md`](docs/benchmark.md) compares like with like.
+- **Goldens pin the contract.** The IR and geometry are compared exactly against committed golden
+  cases, so a parser or router change shows up as a reviewable diff rather than silent drift.
 
 ## Quick start
 
 ```bash
 git clone <this-repo> && cd drawcode
 
-# Python - no install, run straight from the source tree
-export PYTHONPATH=python/src           # Windows: $env:PYTHONPATH = "python/src"
-python -m drawcode.cli build \
+# No install: Node >= 22.6 runs the .ts entry point directly
+node typescript/bin/drawcode.ts build \
     examples/small/c/adc.h examples/small/c/adc.c \
     examples/small/c/dsp.h examples/small/c/dsp.c \
     --root examples/small/c \
     --out out/flow.drawio --svg out/flow.svg
 
-# TypeScript - no install, Node >= 22.6 runs the .ts entry point directly
-node typescript/bin/drawcode.ts build \
-    examples/small/c/adc.h examples/small/c/adc.c \
-    examples/small/c/dsp.h examples/small/c/dsp.c \
-    --root examples/small/c --out out/flow-ts.drawio
-
-# .NET 10 - build once, then run the produced dll
-dotnet build dotnet/DrawCode.slnx -c Release
-dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll build \
-    examples/small/c/adc.h examples/small/c/adc.c \
-    examples/small/c/dsp.h examples/small/c/dsp.c \
-    --root examples/small/c --out out/flow-net.drawio
-
 # Open a .drawio in draw.io, rearrange the nodes, save, then reuse that layout
 # and write the annotations back into your source:
-python -m drawcode.cli build ... --layout-from out/flow.drawio --out out/flow.drawio
-python -m drawcode.cli sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+node typescript/bin/drawcode.ts build ... --layout-from out/flow.drawio --out out/flow.drawio
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c                    # dry run: reports what would change
-python -m drawcode.cli sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c --write            # actually write
 ```
 
-All three implementations emit **byte-identical** `.drawio` for the same input.
-The equivalence table and the per-language test commands are in [`docs/implementations.md`](docs/implementations.md).
+Build commands, the repository map and the test commands are in
+[`docs/implementations.md`](docs/implementations.md).
 
 ## Command-line usage
 
@@ -82,13 +68,12 @@ drawcode inspect <artifact> [--out FILE] [--infer-edges]
 | :--- | :--- |
 | `build` | Parse sources → build IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout. `--svg` also emits a read-only preview sharing the same coordinates. |
 | `sync` | Read `.drawio` → apply layout and annotation attributes → write the **declaration layer** back to source. Dry run unless `--write` is passed. |
-| `inspect` | Read a compiled artifact (`.dll` / `.so` / `.out` / `.a` / `.o`) and emit canonical JSON. Never loads or executes the artifact. TypeScript implementation only; not part of the three-implementation conformance suite. |
+| `inspect` | Read a compiled artifact (`.dll` / `.so` / `.out` / `.a` / `.o`) and emit canonical JSON. Never loads or executes the artifact. PE `.dll` reading uses the bundled .NET sidecar; ELF and `ar` archives are read in-process. |
 
 `--inline` folds one-write/one-read signals into direct edges, `--cards` renders `asset`-bearing
 functions as image cards, `--no-rw-labels` drops the `read`/`write` edge labels, and
-`--straight-edges` replaces orthogonal routing with straight lines. All three implementations accept
-the same flags with the same semantics; without them the output is byte-identical to the old
-behaviour.
+`--straight-edges` replaces orthogonal routing with straight lines. Without them the output is
+byte-identical to the default behaviour.
 
 ## Browsing compiled artifacts
 
@@ -97,14 +82,21 @@ behaviour.
 
 - **Overview** — format, architecture, entity counts and reader diagnostics.
 - **Module cross-links** — a virtualized tree of modules, types, signals and functions; checking a
-  signal draws the write → signal → read flow with orthogonal routing.
+  signal draws its flow in the left-hand wire gutter, from the writing row to the reading row.
 - **Persistent data** — types marked `Store` as ER tables, with field types and nested-type links.
 
-![drawcode artifact viewer](docs/assets/artifact-viewer.png)
+![Module cross-links: a checked port draws a wire from its writing row to its reading row](docs/assets/artifact-viewer.png)
 
-Prerequisites and settings live in [`editors/vscode/README.md`](editors/vscode/README.md). The
-extension calls the TypeScript CLI and does not reimplement PE/ELF parsing; it never loads or
-executes the artifact.
+*Module cross-links: check a port and the wire runs from its writing row to its reading row; a
+struct signal's fields expand in the right-hand groupbox.*
+
+| Persistent data (`Store` types as ER tables) | C artifact, grouped by tag |
+| :---: | :---: |
+| ![persistent data view](docs/assets/artifact-viewer-store.png) | ![C artifact grouped by tag](docs/assets/artifact-viewer-c.png) |
+
+Prerequisites and settings live in [`docs/vscode-extension.md`](docs/vscode-extension.md). The
+extension bundles the same parsing core as the CLI (`readArtifact`) rather than starting an external
+CLI, and it never loads or executes the artifact.
 
 ## Core concepts
 
@@ -133,24 +125,23 @@ executes the artifact.
 | Why the design is shaped this way | [`docs/architecture.md`](docs/architecture.md) |
 | Every annotation key, with types and defaults | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` mapping, routing rules, coordinate semantics | [`docs/drawio-format.md`](docs/drawio-format.md) |
-| Measured performance, three implementations | [`docs/benchmark.md`](docs/benchmark.md) |
-| How the three implementations are held to one spec | [`docs/conformance.md`](docs/conformance.md) |
+| What the golden cases pin, and why they are frozen | [`docs/conformance.md`](docs/conformance.md) |
 | The `ArtifactModel` JSON emitted by `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
-| Browsing a compiled artifact in VS Code | [`editors/vscode/README.md`](editors/vscode/README.md) |
+| Browsing a compiled artifact in VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
+| Making your own C/C# build readable | [`docs/templates.md`](docs/templates.md)（中文） |
+| Running the bundled sample projects | [`docs/examples.md`](docs/examples.md) |
 | Building, testing, adding a language | [`docs/contributing.md`](docs/contributing.md) |
-| How to implement this capability yourself | [`python/SKILL.md`](python/SKILL.md), [`typescript/SKILL.md`](typescript/SKILL.md), [`dotnet/SKILL.md`](dotnet/SKILL.md) |
+| How to implement this capability yourself | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
 ## Development
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 145 tests
-cd typescript && npm test
-cd dotnet && dotnet test
-
-pwsh bench/run.ps1                                        # three-language benchmark
+cd typescript && node --test          # CLI, parsers, IR, layout, conformance
+cd editors/vscode && node --test test/*.test.mjs   # extension host-free tests
 ```
 
-Measured environment: Windows 11 (10.0.22621), Python 3.14.6, Node 24.16.0, .NET SDK 10.0.203.
+The PE sidecar under `tools/drawcode-metadata/` is plain .NET 10 and is only built/run when
+`inspect` reads a `.dll`; the rest of the toolchain needs nothing but Node 22.6+.
 
 ## Measured verification
 
@@ -159,25 +150,30 @@ command in the same column.
 
 | Claim | How it was measured | Result |
 | :--- | :--- | :--- |
-| Python implementation is correct | `python -m unittest discover -s tests -t .` | **145 tests, 0 failures, 0 skipped** |
+| TypeScript implementation is correct | `cd typescript && node --test` | **211 tests, 0 failures, 3 skipped** |
+| Extension tests | `cd editors/vscode && node --test test/*.test.mjs` | **79 tests, 0 failures** |
 | Compressed `.drawio` is read correctly | Read back a draw.io-compressed golden file | **nodes=6, edges=6, attrs=6** — identical to the plain form |
-| Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | raises `ValueError` |
-| Generated `.drawio` is schema-valid | `lxml` XMLSchema against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |
+| Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | throws (never returns an empty layout) |
+| Generated `.drawio` is schema-valid | XSD validation against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |
 | Idempotent round-trip | Build → sync → build, compare | **zero changes on the second sync** |
-| Layout cost | `bench/run.ps1`, 5/10/20/40/80 modules | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s — **super-linear, see below** |
-| Parse cost, same runs | same | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms — linear |
-| Three implementations agree | `tests/golden/*/expected.{ir.json,drawio}` | see [`docs/benchmark.md`](docs/benchmark.md) |
+| Golden IR reproduced exactly | `dump-ir` compared byte-for-byte with `tools/golden/*/expected.ir.json` | **identical in both golden cases** |
 
-The layout figures are the interesting result: **parsing scales linearly while layout is
-quadratic.** Routing each edge tests candidate routes against every other node, so an 80-module
-project spends 95 seconds on layout and 53 milliseconds on parsing. This is stated as a
-characteristic, not hidden as a rounding error — the benchmark document records where the time
-actually goes.
+The measured performance figures from the 2026-10 benchmark (layout quadratic in module count,
+parse linear) were taken on the retired Python reference implementation; they are kept here
+because the algorithms are the same, and are marked as historical rather than current.
+
+| Claim | How it was measured | Result |
+| :--- | :--- | :--- |
+| Layout cost (historical, Python) | 5/10/20/40/80 modules | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s — **super-linear** |
+| Parse cost (historical, Python) | same | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms — linear |
+
+**Parsing scales linearly while layout is quadratic.** Routing each edge tests candidate routes
+against every other node, so an 80-module project spends 95 seconds on layout and 53 milliseconds on
+parsing. This is stated as a characteristic, not hidden as a rounding error.
 
 ## Known limitations (listed honestly)
 
-- **Layout is O(n²)**, so large projects are slow. No spatial index is used yet. This applies
-  equally to all three implementations.
+- **Layout is O(n²)**, so large projects are slow. No spatial index is used yet.
 - **The offline renderer cannot draw `jumpStyle=arc` line jumps.** `jumpStyle` is a draw.io
   extension absent from the open-source mxGraph core. Generated files configure it correctly and the
   draw.io client honours it, but `tools/render/` will not show the jumps. Verify jumps in draw.io.
@@ -187,7 +183,7 @@ actually goes.
   reports `offsetWidth = 0`, so glyph widths are approximated. Text itself renders correctly (SVG
   positioning does not depend on the measurement); label *avoidance* may be off.
 - **The SVG preview does not share the `.drawio` edge routing.** Node positions are shared (both
-  call the same default layout), but `svg.py` draws edges centre-to-centre while `to_drawio` runs
+  call the same default layout), but `svg.ts` draws edges centre-to-centre while `to_drawio` runs
   full anchor selection and obstacle avoidance. SVG edges therefore cross node shapes that the
   `.drawio` routes around. Treat the SVG as a structural read, not a faithful preview. Fixing this
   needs `to_drawio` refactored to expose edge geometry as a shared function.
@@ -195,10 +191,10 @@ actually goes.
 - **Mixed-language single diagrams are not symbol-resolved.** C and C# models can be merged, but a
   cross-language reference to the same name is not resolved.
 - **Multi-page / multi-view, layers and tag filtering are not wired to the CLI.**
-- **Geometry equality across implementations requires porting the same algorithms.** That is the
-  point — but it means a "differently optimised" implementation is only allowed to change *how fast*
-  it computes, never *what* it computes.
+- **Geometry is frozen to the goldens.** A quicker layout algorithm is welcome only if it changes
+  *how fast* geometry is computed, not *what* geometry is produced — otherwise every golden case
+  diffs, and hand-made layouts stop matching.
 
 ## License
 
-[MIT](LICENSE). Vendored third-party material is listed in [`tools/xsd/README.md`](tools/xsd/README.md).
+[MIT](LICENSE). Vendored third-party material is listed in [`tools/xsd/NOTICE.md`](tools/xsd/NOTICE.md).

@@ -364,8 +364,8 @@ test("C#: def-use and array-element write", () => {
 test("C#: Unicode names parse; record declarations stay outside the graph", () => {
   // 回归：类型**与名字**都必须是 Unicode。
   //   · `数据包 a1_数据包;` 必须成为信号；
-  //   · 中文方法 `产出` 必须成为函数（名字位置不再只认 ASCII）；
-  //   · 泛型方法 `泛型产出<T>` 名字后跟 `<`，不得成为函数；
+  //   · 中文方法 `生成` 必须成为函数（名字位置不再只认 ASCII）；
+  //   · 泛型方法 `泛型生成<T>` 名字后跟 `<`，不得成为函数；
   //   · `record` 声明与记录体里的方法不是组件，必须整段跳过。
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-parse-"));
   try {
@@ -373,26 +373,26 @@ test("C#: Unicode names parse; record declarations stay outside the graph", () =
       path.join(dir, "中文类型.cs"),
       [
         "using Drawcode;",
-        "namespace 验证平台;",
+        "namespace 示例;",
         "public static class 设备",
         "{",
-        '    [Drawcode(Direction.Out, Unit = "目标代码与模型文件")]',
+        '    [Drawcode(Direction.Out, Unit = "数据与配置")]',
         "    public static 数据包 a1_数据包;",
-        "    public static 数据包 产出()",
+        "    public static 数据包 生成()",
         "    {",
         "        return default!;",
         "    }",
-        "    public static T 泛型产出<T>(T 关系) { return 关系; }",
+        "    public static T 泛型生成<T>(T 关系) { return 关系; }",
         "    public static coder输出 coder(coder输入 input)",
         "    {",
-        "        测试桩.处理(input);",
-        "        a1_数据包 = 产出();",
+        "        测试桩.消费(input);",
+        "        a1_数据包 = 生成();",
         "        return default!;",
         "    }",
         "}",
-        "public sealed record 数据帧(帧头 头, int 数量)",
+        "public sealed record 采样帧(帧头 头, int 数量)",
         "{",
-        "    public const int 全构型架数 = 100;",
+        "    public const int 最大数量 = 100;",
         "    public 帧头 下一帧() { return default!; }",
         "}",
       ].join("\n"),
@@ -407,9 +407,9 @@ test("C#: Unicode names parse; record declarations stay outside the graph", () =
       f?.params.map((p) => [p.ctype, p.name]),
       [["coder输入", "input"]],
     );
-    assert.equal(m.funcs.has("中文类型.cs::产出"), true, "中文方法名应成为节点");
-    assert.equal(m.funcs.has("中文类型.cs::泛型产出"), false, "泛型方法不得成为节点");
-    assert.equal(m.funcs.has("中文类型.cs::数据帧"), false, "record 声明不得成为节点");
+    assert.equal(m.funcs.has("中文类型.cs::生成"), true, "中文方法名应成为节点");
+    assert.equal(m.funcs.has("中文类型.cs::泛型生成"), false, "泛型方法不得成为节点");
+    assert.equal(m.funcs.has("中文类型.cs::采样帧"), false, "record 声明不得成为节点");
     assert.equal(m.funcs.has("中文类型.cs::下一帧"), false, "记录体里的方法不得成为节点");
     assert.deepStrictEqual(f?.writes, ["中文类型.cs::a1_数据包"]);
   } finally {

@@ -270,7 +270,7 @@ internal sealed class ModelBuilder
             // 枚举成员已在 ScanTypes 里按成员表读取，不再走属性/字段扫描。
             if (type.Kind == "enum") continue;
 
-            // record 的合成属性 EqualityContract、以及手写的计算属性（如 EventLogEntry 的
+            // record 的合成属性 EqualityContract、以及手写的计算属性（如统计记录的
             // ErrorUs）也出现在属性表里，但它们不占内存布局——ER 表会把它们当成真实列。
             // 自动属性与 record 主构造参数都带 <Name>k__BackingField；没有它就不算存储字段。
             var backingFields = definition
@@ -653,7 +653,7 @@ internal sealed class ModelBuilder
                 var name = _reader.GetString(method.Name);
 
                 // 构造函数不是数据流节点；编译器合成的 <...> 方法不是用户写的；
-                // 泛型方法在源码解析器里也不成为函数（见 样本工程/测试桩.cs 注释），
+                // 泛型方法在源码解析器里也不成为函数（见测试桩源码的注释），
                 // 两侧保持一致，验收数字才对得上。
                 if (name is ".ctor" or ".cctor") continue;
                 if (name.StartsWith('<')) continue;

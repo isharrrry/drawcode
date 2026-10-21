@@ -51,7 +51,7 @@ export async function readPeCli(
   if (tool === null) {
     bag.warn(
       DIAG.toolUnavailable,
-      "找不到 drawcode-metadata 工具；PE/CLI 解析需要随包携带的 sidecar 与 .NET 8 运行时",
+      "找不到 drawcode-metadata 工具；PE/CLI 解析需要随包携带的 sidecar 与 .NET 10 运行时",
       name,
     );
     return { ...emptyArtifactModel(name, "pe-cli", "dll"), diagnostics: bag.items };

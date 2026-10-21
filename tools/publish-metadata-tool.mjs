@@ -5,13 +5,14 @@
  * 为什么需要这个脚本，而不是让每个人记 `dotnet publish` 的参数：
  * 发布形态有两条互斥的路线，选错会得到「文件在、但别的机器跑不起来」这种最难查的故障。
  *
- *   1) 框架依赖（默认）：产物只有几百 KB，但目标机必须有 .NET 8 运行时；
- *      `ProjectReference` 是 `net8.0`，所以运行时也要 8.0（更高版本可向下兼容运行）。
+ *   1) 框架依赖（默认）：产物只有几百 KB，但目标机必须有 .NET 10 运行时；
+ *      `ProjectReference` 是 `net10.0`，所以运行时也要 10.0（更高版本可向下兼容运行）。
  *   2) 自包含（--self-contained）：把运行时一起打进去，单平台几十 MB，目标机无需装 .NET；
  *      必须指定 RID（运行时标识符），因为不同平台的运行时不通用。
  *
- * 发布策略（design §5.0）：开发机与 CI 用框架依赖；面向最终用户的 VS Code 扩展
- * 按平台打自包含包。扩展侧先找随包目录，再回退 PATH 里的 `dotnet`。
+ * 发布策略（design §5.0）：开发机、CI 与 VSIX 都用框架依赖——单包跨平台，代价是
+ * 目标机需要 .NET 10 运行时；目标机不能装 .NET 时再用 --self-contained 按平台打包。
+ * 扩展侧先找随包目录，再回退 PATH 里的 `dotnet`。
  *
  * 用法：
  *   node tools/publish-metadata-tool.mjs
@@ -83,7 +84,7 @@ function printUsage() {
       "",
       "  --self-contained        连同 .NET 运行时一起发布（必须配 --runtime）",
       "  --runtime <rid>         目标平台，如 win-x64 / linux-x64 / osx-arm64",
-      "  --out <dir>             输出目录（默认 bin/<Configuration>/net8.0）",
+      "  --out <dir>             输出目录（默认 bin/<Configuration>/net10.0）",
       "  --configuration <name>  Release（默认）或 Debug",
       "",
     ].join("\n"),
@@ -111,7 +112,7 @@ function main() {
   const result = spawnSync("dotnet", args, { stdio: "inherit", cwd: repoRoot });
   if (result.error !== undefined) {
     process.stderr.write(`无法执行 dotnet：${result.error.message}\n`);
-    process.stderr.write("请安装 .NET 8 SDK（https://dotnet.microsoft.com/download）\n");
+    process.stderr.write("请安装 .NET 10 SDK（https://dotnet.microsoft.com/download）\n");
     process.exit(1);
   }
   if (result.status !== 0) {
@@ -119,11 +120,11 @@ function main() {
   }
 
   // 打印最终 dll 的绝对路径：调用方（扩展打包脚本）要把它复制进扩展目录，
-  // 让人肉眼找 bin/Release/net8.0 容易找错平台目录。
+  // 让人肉眼找 bin/Release/net10.0 容易找错平台目录。
   const outDir =
     options.output.length > 0
       ? path.resolve(options.output)
-      : path.join(projectDir, "bin", options.configuration, "net8.0");
+      : path.join(projectDir, "bin", options.configuration, "net10.0");
   process.stdout.write(`sidecar: ${path.join(outDir, "drawcode-metadata.dll")}\n`);
 }
 

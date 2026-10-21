@@ -8,12 +8,12 @@
     在边角处读错；System.Reflection.Metadata 是官方 BCL 实现，稳定且无需第三方包。
     本程序只读字节（PEReader），绝不 Assembly.Load —— 打开产物不等于执行产物。
 
-    TargetFramework 取 net8.0：本机与常见开发机都有 .NET 8 运行时；
-    SDK 9/10 可以正常编译 net8.0 目标。
+    TargetFramework 取 net10.0（LTS）：.NET 8 于 2026-11-10 结束支持，仓库其余 C# 工程
+    已是 net10.0；开发机与使用扩展的机器需要 .NET 10 运行时。
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>drawcode-metadata</AssemblyName>

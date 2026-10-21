@@ -114,5 +114,5 @@ Stated here rather than left for someone to rediscover:
 
 ## Related
 
-- [`tools/render/README.md`](../../tools/render/README.md) — how to run the renderer
+- [Contributing § Offline rendering](../contributing.md#offline-rendering) — how to run the renderer
 - [`../drawio-format.md`](../drawio-format.md) — the `.drawio` mapping and compressed storage form

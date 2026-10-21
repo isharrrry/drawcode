@@ -2,14 +2,14 @@ schema: spec-driven
 
 context: |
   项目: drawcode —— 以源码为唯一事实源、把数据流画成 .drawio 的转译器。
-    三实现字节一致（Python / TypeScript / .NET）；IR 只在内存；
+    单一 TypeScript 实现（Python/.NET 已于 2026-10-21 退役，仍在 git 历史中）；IR 只在内存；
     build: 源码 -> IR -> .drawio/.svg；sync: .drawio -> 源码声明层（不回写引用层）。
-  语言: Python 3.11+、TypeScript（Node >= 22）、C#（.NET 8/9）。
+  语言: TypeScript（Node >= 22）；C# 仅用于元数据模板与 PE sidecar（.NET 10）。
     .NET 侧解析 PE 只用 BCL 的 System.Reflection.Metadata，不引第三方包。
-    新增的 tools/drawcode-metadata 是 PE/CLI 解析 sidecar（net8.0），由 TS 侧 execFile 调用；
-    开发态需要 .NET 8 运行时，发布版按平台自包含打包（原「零运行时依赖」假设已修正）。
-  测试: 金标准在 tests/golden/<case>/{input, expected.ir.json, expected.drawio}。
-    L1 比 IR、L2 比 .drawio 字节、L3 比 SVG。期望值由 tools/dump_ir.py 生成，改动即视为行为变更。
+    tools/drawcode-metadata 是 PE/CLI 解析 sidecar（net10.0），由 TS 侧 execFile 调用；
+    开发态与 VSIX 内均按框架依赖打包，目标机需要 .NET 10 运行时。
+  测试: 金标准在 tools/golden/<case>/{input, expected.ir.json, expected.drawio}。
+    L1 比 IR、L2 比 .drawio 字节、L3 比 SVG。期望值由 `node typescript/bin/drawcode.ts dump-ir` 生成，改动即视为行为变更。
   本次变更: 新增「编译产物」输入（.dll/.so/.out/.a/.o）与 VS Code 只读可视化插件。
     二进制前端只产出 ArtifactModel 与规范 JSON，不参与 .drawio 布局，
     因此不触碰三实现的金标准；一致性约束仍只覆盖「源码 -> IR -> .drawio」这条链。

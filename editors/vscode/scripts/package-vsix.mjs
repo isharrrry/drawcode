@@ -32,8 +32,29 @@ const REQUIRED = [
   "dist/core/artifact/read.js",
   "dist/core/artifact/inspect.js",
   "media/main.js",
-  "README.md",
 ];
+
+/**
+ * Marketplace 说明页的唯一来源是仓库的 docs 页面，不是扩展目录里的副本。
+ * VSIX 规范要求它叫 `extension/README.md`，所以复制时改名；文档本身住在 docs/。
+ */
+const README_SOURCE = path.join(REPO, "docs", "vscode-extension.md");
+
+/**
+ * 把 docs 页面变成 VSIX 里的说明页。只做三处删除，不做渲染：
+ *   - YAML frontmatter 是文档站的元数据，市场页会把它当正文显示；
+ *   - 顶部的「← 文档索引」与末尾的「相关」小节都指向别的 docs 页面，
+ *     而 VSIX 只带这一份说明，留着就是死链。
+ * 其余正文原样保留，避免在打包脚本里维护第二套 Markdown 逻辑。
+ */
+function readmeForVsix() {
+  if (!fs.existsSync(README_SOURCE)) fail(`缺少文档页：${README_SOURCE}`);
+  const text = fs.readFileSync(README_SOURCE, "utf8");
+  const body = text.startsWith("---\n") ? text.slice(text.indexOf("\n---\n", 4) + 5) : text;
+  return body
+    .replace(/^\[←[^\n]*\]\(index[^)\n]*\)\n\n?/m, "")
+    .replace(/\n## 相关\n[\s\S]*$/, "\n");
+}
 
 function fail(message) {
   console.error(`package-vsix: ${message}`);
@@ -85,7 +106,7 @@ try {
   });
   copyDir(path.join(ROOT, "media"), path.join(extensionDir, "media"));
   fs.copyFileSync(path.join(ROOT, "package.json"), path.join(extensionDir, "package.json"));
-  fs.copyFileSync(path.join(ROOT, "README.md"), path.join(extensionDir, "README.md"));
+  fs.writeFileSync(path.join(extensionDir, "README.md"), readmeForVsix());
 
   // ── 2. sidecar：每次现发布，避免包进上一次的旧 dll ────────────────────
   const sidecarProject = path.join(REPO, "tools", "drawcode-metadata", "DrawcodeMetadata.csproj");
@@ -104,7 +125,7 @@ try {
     "drawcode-metadata",
     "bin",
     "Release",
-    "net8.0",
+    "net10.0",
   );
   fs.mkdirSync(sidecarTarget, { recursive: true });
   // .exe 是 apphost，.pdb 是调试符号：运行 `dotnet <dll>` 都用不到。

@@ -41,9 +41,9 @@ templates/c/example/*.a
 templates/c/example/*.so
 templates/c/example/*.out
 
-# C# 金标准 fixture 的编译产物：`dotnet build tests/golden/small-cs` 重建，不入库
-tests/golden/small-cs/bin/
-tests/golden/small-cs/obj/
+# C# 金标准 fixture 的编译产物：`dotnet build tools/golden/small-cs` 重建，不入库
+tools/golden/small-cs/bin/
+tools/golden/small-cs/obj/
 
 # 无元数据演示的编译产物：make / dotnet build 重建，不入库。
 # 源码与构建脚本仍然提交，产物留在工作区供手工验证视图。

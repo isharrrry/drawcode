@@ -1,143 +1,97 @@
 ---
 type: Guide
-title: 各语言实现
-description: 如何构建、测试与调用 Python、TypeScript、.NET 三套实现，以及它们如何被约束到输出一致
-tags: [implementations, python, typescript, dotnet, conformance]
+title: 实现
+description: 如何构建、测试与调用 TypeScript 实现，以及金标准现在钉住什么
+tags: [implementations, typescript, conformance]
 status: stable
 ---
 
-# 各语言实现
+# 实现
 
 [English](implementations.md) | **中文** | [Español](implementations.es.md)
 
 [← 文档索引](index.zh-CN.md)
 
-`drawcode` 把同一份能力发了三次，每种语言一次，这样 [benchmark.md](benchmark.zh-CN.md) 里的
-性能比较比的是实现，而不是生态。
+`drawcode` 只保留一套实现：TypeScript。Node 直接运行 `.ts` 入口，CLI 没有构建步骤，测试路径上也不依赖 `node_modules`。
 
-| | Python | TypeScript | .NET |
-| :--- | :--- | :--- | :--- |
-| 目录 | [`python/`](../python/) | [`typescript/`](../typescript/) | [`dotnet/`](../dotnet/) |
-| 需要 | Python 3.10+ | Node 22.6+ | .NET SDK 10 |
-| 运行时依赖 | **无**（仅标准库） | **无**（没有 `node_modules`） | **无**（仅 BCL） |
-| 入口 | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
-| 测试 | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| 测试数量 | 145 | 210 | 120 |
-| 各实现指南 | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
-
-表里的每条命令都在仓库根目录执行。每个实现目录另有一份 `README.md`，
-以及一份讲移植走查的 `SKILL.md`。
-
-## 共享契约
-
-三套都提供同样的两个操作：
-
-```
-build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
-                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
-sync  <drawio> <files...> [--root DIR] [--write]
-```
-
-| 操作 | 作用 |
+| | TypeScript |
 | :--- | :--- |
-| `build` | 解析源码 → IR → 写出 `.drawio`。`--layout-from` 复用既有图的手工排版；`--svg` 额外产出一份预览。 |
-| `sync` | 读 `.drawio` → 应用排版与注解属性 → 只回写**声明层**。不给 `--write` 就是试跑。 |
+| 目录 | [`typescript/`](../typescript/) |
+| 运行要求 | Node 22.6+（原生类型擦除） |
+| 运行时依赖 | **无**（只用 Node 标准库） |
+| 入口 | `node typescript/bin/drawcode.ts` |
+| 测试 | `cd typescript && node --test` |
+| 测试数 | 211（3 条跳过；报表显示 212，因为把 `test/helpers.ts` 也算作一个条目） |
+| 维护指南 | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 
-四个内容/排版开关在三份 CLI 上同名同义：`--inline` 把「一写一读」的信号折叠成设备直连边；
-`--cards` 把带 `asset` 的函数画成图片卡片；`--no-rw-labels` 去掉边上的 `read`/`write`；
-`--straight-edges` 用直线替代正交布线（人工拐点与出入锚点保留，自动肘点丢弃）。不带这些开关时
-产物与加开关之前逐字节相同 —— 这是共享金标准仍然有意义的前提。
+## 命令
 
-## Python
-
-参考实现。只用标准库，所以从源码检出即可直接运行，无需安装：
-
-```bash
-export PYTHONPATH=python/src          # Windows: $env:PYTHONPATH = "python/src"
-python -m drawcode.cli build examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow.drawio --svg out/flow.svg
-
-cd python && python -m unittest discover -s tests -t .
 ```
-
-已验证：在 `python/` 里执行 `pip install -e .` 也会暴露一个 `drawcode` 控制台脚本，
-且 `drawcode --help` 会列出两个子命令。
-
-## TypeScript
-
-位于 [`typescript/`](../typescript/)。
-
-**没有安装步骤，也没有 `node_modules`。** Node 22.6 及以后会自己剥掉类型标注，
-所以 `.ts` 入口是直接运行的，不会先编译成 JavaScript。
+build   <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                    [--inline] [--cards] [--no-rw-labels] [--straight-edges]
+sync    <drawio> <files...> [--root DIR] [--write]
+dump-ir <files...> [--root DIR] [--out FILE]
+inspect <artifact> [--out FILE] [--infer-edges]
+```
 
 ```bash
 node typescript/bin/drawcode.ts build examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow-ts.drawio
+    --root examples/small/c --merge --out out/flow.drawio --svg out/flow.svg
 
-cd typescript && node --test
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+    --root examples/small/c          # 试运行；加 --write 才写回
+
+node typescript/bin/drawcode.ts inspect tools/golden/small-cs/bin/Debug/net10.0/small-cs.dll
 ```
 
-`npm run typecheck` 确实需要外部的 `typescript` 包，而仓库有意不 vendor 它；
-它不在测试路径上。
+| 开关 | 作用 |
+| :--- | :--- |
+| `build --merge` | 多个模块合成一张图（默认每个模块各出一张） |
+| `build --layout-from FILE` | 复用已有图的人工排版，再按当前源码重建（幂等） |
+| `build --inline` | 把「一写一读」的信号折叠成函数直连边 |
+| `build --cards` | 带 `Asset` 的函数渲染成图片卡片 |
+| `build --no-rw-labels` | 去掉边上的 `read` / `write` 标签，只留线 |
+| `build --straight-edges` | 直线代替正交布线（见下） |
+| `build --svg FILE` | 同时输出只读 SVG 预览 |
+| `sync` | 图 → 源码，只回写声明层；不带 `--write` 是试运行 |
+| `inspect` | 把 `.dll` / `.so` / `.out` / `.a` / `.o` 读成规范 JSON；不加载、不执行目标程序 |
 
-## .NET
+`--inline` 与 `--layout-from` 同时使用时，先折叠再套排版；被折叠掉的节点必须重新布局补位，不能在原位留洞。
 
-位于 [`dotnet/`](../dotnet/)，是一个面向 `net10.0` 的 `.slnx` 解决方案。
+## 依赖
 
-先构建一次，再运行构建产出的程序集：
+零运行时依赖是刻意属性，不是偶然。Node 22.6+ 在加载时擦除类型，`.ts` 入口无需构建步骤，也不需要 `node_modules`。XML 读写与 XSD 子集校验器是手写的：文档结构小，而且要与金标准逐字节对齐，引库反而要迁就它的怪癖。测试框架用内置的 `node --test`。
 
-```bash
-dotnet build dotnet/DrawCode.slnx -c Release
+`@types/node` 与 `typescript` 只是 devDependencies，供 `npm run typecheck` 与编辑器补全；测试路径不加载它们。唯一例外是 `inspect` 的 PE/CLI 分支，它调用 [`tools/drawcode-metadata`](../tools/drawcode-metadata/)（.NET 10 sidecar，不在 npm 包内）；ELF 与 `ar` 在进程内读取。
 
-dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll build \
-    examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow-net.drawio
+## 测试
 
-dotnet test dotnet/DrawCode.slnx -c Release
-```
+`cd typescript && node --test` 跑 211 个测试（3 条跳过）：18 个一致性测试 + 193 个单元测试。报表显示 212，因为 `test/helpers.ts` 不含测试但匹配了发现规则。
 
-上面两套实现各自附带一份 `SKILL.md`，记录了 Node 与 .NET 特有的坑
-（正则语义、XML 序列化、没有 `DOMParser`；`XDocument` 会写出金标准文件没有的 XML 声明、
-浮点格式化要用 `CultureInfo.InvariantCulture`，以及原始 deflate
-需要 `DeflateStream` 而不是 `ZLibStream`）。
+## 有设计后果的开关
 
-## 一致性是如何被强制的
+### `--straight-edges` 不能改成默认
 
-三套实现一致不是感觉，而是测试。三套都被 [`conformance.md`](conformance.md)
-和 `tests/golden/` 下的金标准用例约束：
+默认是正交布线。两份金标准都写死了 `orthogonalEdgeStyle` 与 `<Array as="points">`；改默认会让它们立刻变红，并让所有按旧几何记录的手工布局失效。所以这个开关只能显式打开。换样式时四件事必须一起做：去掉 `edgeStyle=orthogonalEdgeStyle`、`rounded=1` 与 `jumpStyle=arc`，**保留** `exitX`/`exitY`/`entryX`/`entryY` 锚点。直线适合「一行一个节点」的拓扑；在分区带 + 卡片布局里会变成斜线网，可能穿过卡片和标签。
 
-| 级别 | 比较内容 | 容差 |
-| :--- | :--- | :--- |
-| L1 —— 解析（IR） | 信号、函数、参数、边、设备、文件 | 精确 |
-| L2 —— 图结构 | 容器、嵌套、节点归属、边的端点 | 精确 |
-| L3 —— 几何 | 节点 `x`/`y`/`w`/`h`、折线点、边锚点 | 精确 |
-| L4 —— schema | 通过 `tools/xsd/mxfile.xsd` 校验 | 必须通过 |
+## 范围限制
 
-**三套实现都逐字节复现了 `small-c` 与 `small-cs` 金标准用例** ——
-`expected.drawio` 与 `expected.ir.json` 的 SHA256 完全相同。这比规格所要求的
-归一化比较更严格：它是精确到最后一位数字的 L3 几何一致，而不仅仅是结构
-相等。
+- 不支持多页、draw.io Layer 分层、tags 过滤：都没有接到 CLI。
+- 混合语言输入可以合并，但跨语言的同名符号不做解析。
+- `npm run typecheck` 需要先 `npm install`；测试不需要。
 
-**一致性运行器在缺少金标准文件时必须大声失败，而不是跳过。**
-一个被静默跳过的合规测试，会让未验证的实现看起来已验证。这件事在本项目自己的开发过程中
-真的发生过：XSD 校验测试从同级仓库解析 schema，于是任何没有那个检出的人都会
-跳过三个测试。schema 现在已 vendor 到
-[`tools/xsd/mxfile.xsd`](../tools/xsd/mxfile.xsd)，三个测试都会执行。
+## 金标准钉住什么
 
-## 为什么输出一致比看上去更重要
+[`tools/golden/`](../tools/golden/) 下有 `small-c` 与 `small-cs`：输入源码、规范化 IR、期望的 `.drawio` 与预览 SVG。测试逐项精确比较 L1（IR）、L2（图结构）、L3（几何），并用 [`tools/xsd/mxfile.xsd`](../tools/xsd/mxfile.xsd) 做 L4（Schema）校验。重生成金标准是刻意动作，见 [contributing.zh-CN.md](contributing.zh-CN.md)。
 
-只有当三套实现做的是**同样的工作**，基准测试才有意义。一个画得更漂亮但更快的
-路由器会拿到更好看的数字，却什么也证明不了。
+## 已退役的实现
 
-所以约束是显式的：**优化可以改变计算得多快，永不改变
-计算什么。** 加速障碍物查询的空间索引是正当的。换一套路由
-启发式则不是 —— 那会悄悄把基准测试变成三个不同程序之间的
-比较。
+2026-10 之前仓库还带有独立的 Python 与 .NET 实现。它们的作用是互相校验同一份契约，并做性能对照。产品线收敛到 TypeScript 实现（VS Code 扩展 + 二进制产物读取）之后，维护三套解析器不再划算，两套目录已于 2026-10-21 从工作区移除。
 
-这是对实现如何演进的一项真实限制，而它是有意被接受的。
+移除改变的是**测什么**，不是**要求什么**：金标准仍然钉住 IR 与几何。退役的两套代码仍保留在该日期之前的 git 历史中。
 
 ## 相关
 
-- [`conformance.md`](conformance.md) —— 完整的比较规格
-- [benchmark.md](benchmark.zh-CN.md) —— 实测数字
-- [architecture.md](architecture.zh-CN.md) —— 设计为什么是这个形状
+- [`conformance.md`](conformance.md) —— 测试比较什么、怎么比较
+- [`artifact-format.md`](artifact-format.md) —— 二进制产物模型
+- [`contributing.zh-CN.md`](contributing.zh-CN.md) —— 环境、测试与金标准

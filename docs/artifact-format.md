@@ -15,8 +15,8 @@ modules, signals, types, functions and edges. This is a second input path, paral
 source parser.
 
 The source path (`build` / `sync` / `dump-ir`) is unchanged: source is still the single
-source of truth, the IR still lives only in memory, and the three implementations still
-produce byte-identical `.drawio` files. The artifact path deliberately does **not** feed
+source of truth, the IR still lives only in memory, and the output still matches the golden
+`.drawio` files byte-for-byte. The artifact path deliberately does **not** feed
 into `.drawio` generation, so it cannot drift the golden files.
 
 ## What can be read
@@ -186,14 +186,15 @@ stdout with no extra text, so it can be piped into `jq` or diffed directly.
 
 ## Dependency and packaging
 
-The PE reader is a .NET 8 sidecar built from `tools/drawcode-metadata`; the TypeScript side
+The PE reader is a .NET 10 sidecar built from `tools/drawcode-metadata`; the TypeScript side
 only locates it, runs it with `execFile`, and parses stdout. The sidecar writes UTF-8 bytes
 explicitly — a Windows console using GBK would otherwise turn Chinese symbol names into
 U+FFFD while every count still looked correct.
 
-- Development: `node tools/publish-metadata-tool.mjs` (framework-dependent, needs .NET 8).
-- Release: `node tools/publish-metadata-tool.mjs --self-contained --runtime <rid>` for a
-  per-platform package with the runtime included.
+- Development: `node tools/publish-metadata-tool.mjs` (framework-dependent, needs .NET 10).
+- Release: the bundled VSIX ships the same framework-dependent build, so the machine needs the
+  .NET 10 runtime. `--self-contained --runtime <rid>` remains available for machines that cannot
+  install .NET; it produces a larger per-platform package with the runtime included.
 
 ## Boundaries
 

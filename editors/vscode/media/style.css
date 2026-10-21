@@ -745,7 +745,7 @@ body {
 .cascade-label {
   flex: 1 1 auto;
   /* 端口行缩进最深时，信号名会被右侧内容挤成 0 宽；给一个下限，
-     让“a27 dev_a→dev_b …”至少可辨认。 */
+     让“dev_a → dev_b …”至少可辨认。 */
   min-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;

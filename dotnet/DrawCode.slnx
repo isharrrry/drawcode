@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="src/DrawCode/DrawCode.csproj" />
-  <Project Path="tests/DrawCode.Tests/DrawCode.Tests.csproj" />
-</Solution>

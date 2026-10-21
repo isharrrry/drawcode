@@ -1,6 +1,6 @@
 /**
  * 命令行入口：`build`（源码 -> .drawio）、`sync`（.drawio -> 源码声明层）。
- * 对等 Python `cli.py` 与 .NET `Cli.cs`，三者接受同一组参数。
+ * 参数集合与退出码是 CLI 契约；早期的 Python / .NET 实现接受同一组参数，已于 2026-10-21 退役。
  *
  * 两个"宁可大声失败"的地方（都曾经静默出错）：
  *
@@ -61,7 +61,7 @@ const USAGE = `usage: drawcode <build|sync> ...
 
   dump-ir <files...> [--root DIR] [--out FILE]
         parsed IR as canonical JSON, for L1 conformance comparison
-        (write to stdout when --out is omitted; same shape as tools/dump_ir.py)
+        (write to stdout when --out is omitted; this is also how the goldens are regenerated)
 
   inspect <artifact> [--out FILE] [--infer-edges]
         compiled artifact (.dll/.so/.out/.a/.o) as canonical JSON
@@ -221,7 +221,7 @@ function metadataToolPath(): string {
     "drawcode-metadata",
     "bin",
     "Release",
-    "net8.0",
+    "net10.0",
     "drawcode-metadata.dll",
   );
 }

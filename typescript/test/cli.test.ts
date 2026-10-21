@@ -175,8 +175,8 @@ test("path: nested containers are emitted with a parent chain", () => {
 });
 
 test("dump-ir: canonical JSON matches the golden", () => {
-  // 三版 CLI 的公开面必须一致：.NET 有 dump-ir，TS/Python 也必须有。
-  // 产物口径与 tools/dump_ir.py 相同 —— 逐字节比对金标准，而不是只比字段。
+  // 金标准由本实现自己重生成；这里要求逐字节一致，而不是只比字段。
+  // 2026-10 之前这个口径由 tools/dump_ir.py（Python 参考实现）定义，现已退役。
   const tmp = fixture();
   try {
     const out = path.join(tmp, "ir.json");
@@ -186,6 +186,31 @@ test("dump-ir: canonical JSON matches the golden", () => {
       fs.readFileSync(out, "utf8"),
       mustRead(path.join(CASES_DIR, "small-c", "expected.ir.json")),
     );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("cli: a hand-drawn drawio cannot supply a layout", () => {
+  // `examples/drawio/rack-example.drawio` 是真正的 draw.io 导出，节点是裸 mxCell，
+  // 没有 drawcode 的 symbolId。旧行为是把所有节点静默放在 0,0；现在必须显式失败。
+  // 这条原先只由 Python 的 TestHandDrawnDiagram 覆盖，Python 退役后迁到这里。
+  const tmp = fixture();
+  const rack = path.resolve(
+    import.meta.dirname,
+    "..",
+    "..",
+    "examples",
+    "drawio",
+    "rack-example.drawio",
+  );
+  const out = path.join(tmp, "merged.drawio");
+  try {
+    assert.equal(
+      runBuild(tmp, "adc.h", "adc.c", "--root", tmp, "--merge", "--layout-from", rack, "--out", out),
+      2,
+    );
+    assert.equal(fs.existsSync(out), false, "layout rejection must not write a diagram");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

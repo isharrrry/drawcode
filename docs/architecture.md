@@ -58,43 +58,42 @@ compressed-storage trap.
 
 ```
                     ┌──────────────────────────────┐
-   source files ───▶│ cparse.py / csparse.py       │  language front ends
+   source files ───▶│ cparse.ts / csparse.ts       │  language front ends
                     │  (one per source language)   │
                     └───────────────┬──────────────┘
                                     ▼
                     ┌──────────────────────────────┐
-                    │ model.py                     │  IR (in memory only)
+                    │ model.ts                     │  IR (in memory only)
                     │  Signal / Func / Edge / ...  │
                     └───────────────┬──────────────┘
                                     ▼
         ┌───────────────────────────┼───────────────────────────┐
         ▼                           ▼                           ▼
 ┌───────────────┐         ┌──────────────────┐        ┌────────────────┐
-│ drawio.py     │         │ svg.py           │        │ codegen.py     │
+│ drawio.ts     │         │ svg.ts           │        │ codegen.ts     │
 │ IR ↔ .drawio  │         │ IR → SVG preview │        │ IR → code      │
 │ layout+route  │         │ (node layout     │        │ (declaration   │
 │               │         │  only, see note) │        │  layer only)   │
 └───────────────┘         └──────────────────┘        └────────────────┘
         ▲                                                      │
-        └──────────────────── cli.py ──────────────────────────┘
+        └──────────────────── cli.ts ──────────────────────────┘
                           build / sync
 ```
 
 | Module | Owns | Does **not** own |
 | :--- | :--- | :--- |
-| `model.py` | IR types and edge derivation | any I/O |
-| `cparse.py` | C syntax → IR | layout, drawing |
-| `csparse.py` | C# syntax → IR | layout, drawing |
-| `parse.py` | extension dispatch, multi-language merge | syntax details |
-| `drawio.py` | layout, routing, `.drawio` read/write | source syntax |
-| `svg.py` | SVG preview | routing (see below) |
-| `codegen.py` | declaration-layer write-back | function bodies (never) |
-| `cli.py` | argument handling, file I/O | any algorithm |
+| `model.ts` | IR types and edge derivation | any I/O |
+| `cparse.ts` | C syntax → IR | layout, drawing |
+| `csparse.ts` | C# syntax → IR | layout, drawing |
+| `parse.ts` | extension dispatch, multi-language merge | syntax details |
+| `drawio.ts` | layout, routing, `.drawio` read/write | source syntax |
+| `svg.ts` | SVG preview | routing (see below) |
+| `codegen.ts` | declaration-layer write-back | function bodies (never) |
+| `cli.ts` | argument handling, file I/O | any algorithm |
 
-**The rule that keeps this maintainable**: `drawio.py` contains **no language branches**. A diagram
-is a picture of the IR, and the IR is language-agnostic. If a language check ever appears in
-`drawio.py`, the three implementations can no longer share one layout specification, and the
-benchmark stops being meaningful.
+**The rule that keeps this maintainable**: `drawio.ts` contains **no language branches**. A diagram
+is a picture of the IR, and the IR is language-agnostic. A language check inside the renderer would
+mean the geometry golden is really two different contracts wearing one name.
 
 ## Data flow: `build`
 
@@ -148,31 +147,32 @@ writes function bodies from a picture is guessing, and guessing in a source file
 Restricting the reverse direction to declarations makes the operation provably safe: it can only
 touch lines whose full content the diagram actually represents.
 
-## Three implementations, one specification
+## One implementation, a frozen geometry contract
 
-Python, TypeScript and .NET 10 each implement this architecture independently, in their own idiom.
-They are held to identical output by [`conformance.md`](conformance.md) and the golden
-cases in `tests/golden/`.
+There is one implementation, TypeScript, held to the golden cases in `tools/golden/` byte-for-byte
+([`conformance.md`](conformance.md)). Until 2026-10-21 two further implementations (Python and .NET)
+existed and were compared against the same goldens; they were retired once the TypeScript output
+proved byte-identical, and remain in git history.
 
 The honest consequence: **optimisation may change how fast something is computed, never what is
 computed.** A spatial index that speeds up obstacle queries is fine; a smarter router that produces
-prettier edges is not, because it breaks comparability. This constraint is what makes
-[benchmark.md](benchmark.md) meaningful.
+prettier edges is not, because it invalidates every golden and every hand-made layout recorded
+against the old geometry.
 
 ### Known divergence: the SVG preview
 
-`svg.py` shares the **node** layout with `drawio.py` (both call `_assign_default_positions`) but
+`svg.ts` shares the **node** layout with `drawio.ts` (both call `_assign_default_positions`) but
 **not the edge router**. It draws edges centre-to-centre, so they visibly cross node shapes that the
 `.drawio` routes around. The SVG is a structural read, not a faithful preview. Supplying real
-routing requires refactoring `to_drawio` to expose edge geometry as a shared function; both
-implementations currently reproduce the simplified behaviour on purpose.
+routing requires refactoring `to_drawio` to expose edge geometry as a shared function; until then
+the simplified behaviour is deliberate.
 
 ## Artifact viewer: reading products, not sources
 
 `drawcode inspect` reads a compiled artifact (PE/CLI, ELF, ar) and emits a model of modules, types,
 signals, functions and read/write edges. The shape is familiar, but the source is different:
-metadata and IL/symbols instead of text. It never loads or executes the artifact, and it is
-TypeScript-only — the Python and .NET implementations do not take part in this path.
+metadata and IL/symbols instead of text. It never loads or executes the artifact. PE metadata is
+read by the bundled .NET 10 sidecar; ELF and ar are read in-process.
 
 The VS Code extension in `editors/vscode/` is a thin client of that command. A custom read-only
 editor shells out to `inspect`, posts the canonical JSON into a webview, and renders three views
@@ -190,4 +190,4 @@ computed for the viewer at runtime. The JSON contract is
 - [annotations.md](annotations.md) — the annotation keys that carry direction and metadata
 - [drawio-format.md](drawio-format.md) — mapping rules, coordinates, routing, compression
 - [artifact-format.md](artifact-format.md) — the `ArtifactModel` JSON emitted by `inspect`
-- [../conformance.md](conformance.md) — how the three implementations are held together
+- [../conformance.md](conformance.md) — what the goldens pin and which behaviours they cannot see

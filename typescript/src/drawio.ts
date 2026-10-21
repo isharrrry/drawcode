@@ -815,8 +815,8 @@ export function autoWaypoints(model: Model): Map<string, Point[]> {
  * 图下面塞不下「别名() + 类型 名字()」两行，而设备名本来就在命中它的那行注释里。
  *
  * `cards` 默认关：`asset` 在默认视图里是**纯属性**（`<object>` 上带着它，供 `sync` 回写注解），
- * 不改变节点的样式与文字。这是三实现共享的金标准（`tests/golden` 下各用例的 `expected.drawio`）
- * 钉住的行为，单方面把 TS 的默认渲染换成图片卡片，会让 Python 与 .NET 在同一份源码上画出不同的图。
+ * 不改变节点的样式与文字。这是金标准（`tools/golden` 下各用例的 `expected.drawio`）
+ * 钉住的行为，把默认渲染换成图片卡片会让所有几何金标准失效。
  */
 export function nodeLabel(kind: EntityKind, e: Signal | Func, cards = false): string {
   if (kind === "signal") {

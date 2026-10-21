@@ -2,7 +2,7 @@ import type { Model } from "./model.ts";
 import { compareCodePoints } from "./order.ts";
 
 /**
- * IR → 规范化 JSON，对等 `../../tools/dump_ir.py`。
+ * IR → 规范化 JSON，`dump-ir` 与 L1 金标准共用这一口径。
  *
  * 刻意**不包含**布局坐标（x/y/w/h）：布局是 `.drawio` 层的事，
  * 混进 L1 会让路由 bug 看起来像解析 bug（见 ../../docs/conformance.md）。
@@ -141,8 +141,8 @@ function sortKeys(value: unknown): unknown {
 }
 
 /**
- * 规范化 JSON 文本，**逐字节**对等 `tools/dump_ir.py` 的产物：
- * 键按字母序排列（Python `sort_keys=True`），两空格缩进，末尾一个换行。
+ * 规范化 JSON 文本，**逐字节**钉住金标准目录下各用例的 `expected.ir.json`：
+ * 键按字母序排列（码点序，不是 UTF-16 码元序），两空格缩进，末尾一个换行。
  */
 export function dumpIrJson(model: Model): string {
   return `${JSON.stringify(sortKeys(dumpIr(model)), null, 2)}\n`;

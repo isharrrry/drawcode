@@ -2,9 +2,10 @@
 
 面向**下一个要加一门语言解析器的人**，也面向任何要在 Node 里做同类图转换的人。
 
-参考实现是 `python/src/drawcode/`。判定口径在 `../docs/conformance.md`（四个比较层次）。
-本包与 Python 版**几何结果精确相等**：`../tests/golden/` 的两个金标准，生成的 `.drawio` 与
-`preview.svg` 都是**逐字节相同**，不只是结构相等。
+参考实现就是本包（`typescript/src/`）。判定口径在 `../docs/conformance.md`（四个比较层次）。
+早期的 Python 参考实现与 .NET 实现已于 2026-10-21 退役（仍留在 git 历史中）；本包生成的
+`.drawio` 与 `preview.svg` 对 `../tools/golden/` 的两个金标准**逐字节相同**，这也是退役的前提。
+下文与 Python 的逐点对照保留下来，因为它解释了这些代码为什么长这样，也是重新实现时的对照表。
 
 ---
 
@@ -12,19 +13,19 @@
 
 ```bash
 cd typescript
-npm test                    # 175 个测试（报表 176，含 helpers.ts 条目），0 依赖，0 skip
+npm test                    # 211 个测试（报表 212，含 helpers.ts 条目），0 依赖，3 skip
 node bin/drawcode.ts build src/*.c src/*.h --root src --out flow.drawio --svg flow.svg
 ```
 
 **零运行时依赖。** devDependency 只有 `typescript` 与 `@types/node`，且仅服务 `typecheck` 与 IDE；
 Node ≥ 22.6 原生擦除类型直接跑 `.ts`，测试不需要 tsc，
-也不需要 `@xmldom/xmldom`（XML 解析器 200 行就够，而且让三版 benchmark 站在同一起跑线）。
+也不需要 `@xmldom/xmldom`（XML 解析器 200 行就够，而且能精确复现金标准里的空元素拼写与转义）。
 
 ---
 
 ## 1. 模块划分与职责
 
-| 文件 | 职责 | 对应的 Python |
+| 文件 | 职责 | 早期 Python 对应（已退役） |
 | :--- | :--- | :--- |
 | `src/model.ts` | IR 数据结构（Signal / Param / Func / Edge / Device / Model） | `model.py` |
 | `src/cparse.ts` | C → IR：`/// @drawcode dir=`、`/// @device`、普通变量声明即信号、struct、形参作端口、局部变量不入图 | `cparse.py` |
@@ -34,9 +35,9 @@ Node ≥ 22.6 原生擦除类型直接跑 `.ts`，测试不需要 tsc，
 | `src/codegen.ts` | IR → 代码（**仅声明层**，永不改函数体） | `codegen.py` |
 | `src/svg.ts` | IR → SVG 预览（与 .drawio 同坐标） | `svg.py` |
 | `src/cli.ts` + `bin/drawcode.ts` | 命令行 build / sync | `cli.py` |
-| `src/dump.ts` | IR → 规范化 JSON（L1 金标准的口径） | `../tools/dump_ir.py` |
+| `src/dump.ts` | IR → 规范化 JSON（L1 金标准的口径） | 已退役的 `tools/dump_ir.py` |
 
-**Python 没有、TS 必须自己有的三个**：
+**Node 标准库没有、必须自己实现的三个**（当初为对齐 Python 语义而写，现在它们本身就是金标准的一部分）：
 
 | 文件 | 为什么 |
 | :--- | :--- |
@@ -195,11 +196,10 @@ class Model {
 - `<mxPoint as="offset">` 加的是**全局坐标轴**位移，正数往右/往下，与边的走向无关。用它。
 - `mxGeometry` 的 `x`（=0）是沿边的位置，0 表示弧长中点，保持不动。
 
-去叠印已在 Python 与 .NET 对齐，三份实现使用同一套常量（`LABEL_LANE=17`、`LABEL_FONT=12`、
-2px 容差、+1/−1/+2… 的交替位移）和同一套子单元格写法。金标准 `small-c` 里没有一对撞上的标签，
-所以**金标准全绿也照不出这套逻辑的退化** —— 每份实现各有确定性夹具（TS 的在
-`test/drawio.test.ts` 末尾，自带「两条边折线完全重合」的用例）。见 `docs/conformance.md` 的
-“Aligned extensions”。
+去叠印的常量（`LABEL_LANE=17`、`LABEL_FONT=12`、2px 容差、+1/−1/+2… 的交替位移）与子单元格
+写法都是几何契约的一部分。金标准 `small-c` 里没有一对撞上的标签，**所以金标准全绿也照不出这套
+逻辑的退化** —— 确定性夹具在 `test/drawio.test.ts` 末尾，自带「两条边折线完全重合」的用例。
+见 `docs/conformance.md` 的“Behaviours the goldens cannot see”。
 
 ### 反向：`.drawio` → IR
 
@@ -248,7 +248,7 @@ npm test                          # 全部
 npm run test:conformance          # 只跑 L1–L4 金标准
 ```
 
-一致性测试在 `test/conformance.test.ts`，对 `../tests/golden/<name>/` 逐层断言：
+一致性测试在 `test/conformance.test.ts`，对 `../tools/golden/<name>/` 逐层断言：
 
 | 层次 | 断言 | 关键点 |
 | :--- | :--- | :--- |
@@ -266,9 +266,9 @@ JSON 不可解析、或案例目录没有登记在 `CASE_INPUTS` 时都会 throw
 故意损坏的文档（违反 fixed、未声明属性、枚举越界、缺必需属性、多余子元素），
 断言它们**必须**被拒。改校验器时这组测试是安全网。
 
-跨实现验证：`test/fixtures/*.compressed.drawio` 是 **Python 生成的**压缩串
-（`python tools/make-fixtures.py`），TS 读它并与明文结果对比 —— 避免"自己 pack
-又被自己 unpack"的自证循环。
+外部压缩串验证：`test/fixtures/*.compressed.drawio` 由早期 Python 工具生成、已提交且不再重新生成。
+读它并与明文结果对比，避免"自己 pack 又被自己 unpack"的自证循环；要改压缩逻辑时，
+先拿真正的 draw.io 另存一份做同样的对比。
 
 ---
 
@@ -528,7 +528,7 @@ Set-Content  -LiteralPath $p -Value $t -NoNewline -Encoding utf8
 - **`applyLayout` 里 `autoWaypoints` 的比较**：它区分"生成器写的拐点"和"人拖的拐点"。
   去掉这一步，`--layout-from` 复用一次就会把自动拐点固化死。
 - **`EDGE_STYLE` 的默认值（`edgeStyle=orthogonalEdgeStyle;rounded=1;…`）**：它不只是个样式串，
-  而是 TS / Python / .NET **共享契约**的一部分 —— 每份金样的 `expected.drawio` 里都写死了它和
+  而是**冻结几何契约**的一部分 —— 每份金样的 `expected.drawio` 里都写死了它和
   `<Array as="points">`，改默认值会让 18/18 一致性当场全红。要换走法就**加开关**（现成的例子是
   `--straight-edges` 与 `STRAIGHT_EDGE_STYLE`）：在 `cli.ts` 里读成布尔量，一路透传给
   `toDrawio` / `toSvg`，默认 `false` 保证既有产物逐字节不变。换样式时有四件事必须一起做，

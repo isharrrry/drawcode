@@ -1,10 +1,13 @@
 // drawcode 元数据模板（C#）。
 //
+// 用法、参数表、可读成员与构建约束见 docs/templates.md 的「C# template (.NET)」一节；
+// 本文件只保留特性定义本身。
+//
 // 把本文件复制进你的工程即可，不需要任何 NuGet 包或构建步骤。
 // 特性编译进程序集后，`drawcode inspect` / VS Code 插件从元数据里读回声明，
 // 再从 IL 的 ldsfld/stsfld 还原读写边 —— 不需要源码、也不会执行你的程序集。
 //
-// 与旧版模板（模板目录/DrawcodeAttributes.cs）的差异只有新增的四个命名参数，
+// 与旧版模板的差异只有新增的四个命名参数，
 // 旧的 [Drawcode(Direction.In, Unit = "V", Alias = "电压")] 原样编译、行为不变。
 
 using System;

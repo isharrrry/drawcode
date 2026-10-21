@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { loadCells, readLayout } from "../src/drawio.ts";
 
 export const REPO = path.resolve(import.meta.dirname, "..", "..");
-export const CASES_DIR = path.join(REPO, "tests", "golden");
+export const CASES_DIR = path.join(REPO, "tools", "golden");
 export const XSD_PATH = path.join(REPO, "tools", "xsd", "mxfile.xsd");
 export const EXAMPLES_C = path.join(REPO, "examples", "small", "c");
 export const EXAMPLES_CS = path.join(REPO, "examples", "small", "cs");
@@ -37,7 +37,7 @@ export function mustReadJson(file: string): unknown {
   }
 }
 
-/** 每个金标准案例的输入文件清单 —— 与 ../../tools/dump_ir.py 的调用保持一致。 */
+/** 每个金标准案例的输入文件清单 —— 重新生成 expected.ir.json 时要传同一组文件。 */
 const CASE_INPUTS: Record<string, string[]> = {
   "small-c": ["adc.h", "adc.c", "dsp.h", "dsp.c"],
   "small-cs": ["Adc.cs", "Dsp.cs"],

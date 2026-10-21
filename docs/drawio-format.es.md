@@ -226,7 +226,7 @@ Del lado de la escritura, el conjunto de escape importa igual. Los caracteres qu
 | `<diagram>` con texto vacío | se omite — algunos ficheros contienen diagramas de relleno |
 | `<diagram>` cuyo texto no se puede inflar | **lanza `ValueError`** |
 
-Esa última fila es la decisión de diseño que merece decirse sin rodeos: devolver un diseño vacío sería indistinguible de un diagrama que realmente no tiene diseño, y quien llama sobrescribiría trabajo hecho a mano con los valores por defecto. Lanzar hace visible la corrupción en el punto de fallo. `conformance.md` lo enumera como capacidad obligatoria y no como refinamiento, y exige el mismo comportamiento a las tres implementaciones.
+Esa última fila es la decisión de diseño que merece decirse sin rodeos: devolver un diseño vacío sería indistinguible de un diagrama que realmente no tiene diseño, y quien llama sobrescribiría trabajo hecho a mano con los valores por defecto. Lanzar hace visible la corrupción en el punto de fallo. `conformance.md` lo enumera como capacidad obligatoria y no como refinamiento.
 
 Como ambas formas se inflan al mismo árbol, `read_layout` es agnóstico a la forma: el mismo fichero guardado por drawcode y vuelto a guardar por draw.io produce nodos, aristas y atributos idénticos. Esa igualdad se verifica contra un fichero dorado comprimido con draw.io.
 
@@ -263,4 +263,5 @@ Una regla de esa lista merece repetirse aquí porque es una regla del formato `.
 - [annotations.md](annotations.md) — de dónde salen los atributos del `<object>`
 - [architecture.md](architecture.md) — por qué solo se reescribe la capa de declaración
 - [`conformance.md`](conformance.md) — niveles de comparación y reglas de normalización
-- [`tools/render/README.md`](../tools/render/README.md) — renderizar un `.drawio` sin tener draw.io instalado
+- [Contributing § Offline rendering](contributing.md#offline-rendering) — renderizar un `.drawio`
+  sin tener draw.io instalado

@@ -137,16 +137,15 @@ sized `(NaN, NaN)`, which is invisible in draw.io.
 
 All three keys are read by **every** front end, in a `.c` and in a `.cs`, on signals and on functions.
 Earlier revisions read `xy`/`size` only in the function branch, only on some front ends, and never
-read `style`; those gaps are closed in all three implementations now. The rules are identical
-everywhere:
+read `style`; those gaps are closed now. The rules are identical everywhere:
 
 - a missing key or an empty string leaves the entity's default untouched;
 - a malformed value does **not** raise — it becomes `NaN`, and a node with `NaN` geometry is invisible
   in draw.io;
 - `xy` splits on a comma, `size` on a lowercase `x` (the value is lowercased first, so `180X72` is
   accepted);
-- conversion follows JavaScript `Number()`, not Python `float()` or .NET `double.Parse` — the three
-  strings where those differ (`"1_0"`, `"infinity"`, `"0x10"`) are covered by parity tests.
+- conversion follows JavaScript `Number()` — the three strings where it differs from a typical
+  `strtod`-style parse (`"1_0"`, `"infinity"`, `"0x10"`) are covered by tests.
 
 `sync` writes the pair back too, for entities whose diagram geometry differs from what `build` would
 have written — see [Write-back](#write-back). Because every implementation ignores unknown keys
@@ -312,10 +311,10 @@ These rules need no annotation because they follow from the code's structure.
 | `style` | **never** — it is an input-only key, like `clientX` on an element |
 | function **body** | **never** — this is the design constraint, not a gap |
 
-All three implementations write the pair back, and all three merge at **parameter level**: a
+`sync` writes the pair back and merges at **parameter level**: a
 hand-written `Style`, a compact `Unit="LSB"` or a `[Device]` line above the attribute survives
-untouched, and only the keys whose values actually changed are rewritten. `sync` therefore
-round-trips a rearranged diagram through any of the three, not just TypeScript.
+untouched, and only the keys whose values actually changed are rewritten. A rearranged diagram
+therefore round-trips without disturbing hand-written annotations.
 
 The geometry row is conditional, and the condition is what keeps `sync` honest. `applyLayout` is the
 one place that holds both numbers — what the diagram now says, and what `build` would have written

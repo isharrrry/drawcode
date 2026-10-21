@@ -63,7 +63,7 @@ for (const name of names) {
   });
 
   test(`[${name}] L1 (strict) — canonical IR JSON is byte-identical to the golden`, () => {
-    // 比 L1 更严：连键序和空白都要与 tools/dump_ir.py 的产物逐字节一致。
+    // 比 L1 更严：连键序和空白都要与已提交的 expected.ir.json 逐字节一致。
     const model = parseAny(golden.files, golden.root);
     assert.equal(dumpIrJson(model), mustRead(path.join(CASES_DIR, name, "expected.ir.json")));
   });

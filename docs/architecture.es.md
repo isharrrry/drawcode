@@ -58,43 +58,42 @@ trampa del almacenamiento comprimido.
 
 ```
                     ┌──────────────────────────────┐
-   source files ───▶│ cparse.py / csparse.py       │  language front ends
+   source files ───▶│ cparse.ts / csparse.ts       │  language front ends
                     │  (one per source language)   │
                     └───────────────┬──────────────┘
                                     ▼
                     ┌──────────────────────────────┐
-                    │ model.py                     │  IR (in memory only)
+                    │ model.ts                     │  IR (in memory only)
                     │  Signal / Func / Edge / ...  │
                     └───────────────┬──────────────┘
                                     ▼
         ┌───────────────────────────┼───────────────────────────┐
         ▼                           ▼                           ▼
 ┌───────────────┐         ┌──────────────────┐        ┌────────────────┐
-│ drawio.py     │         │ svg.py           │        │ codegen.py     │
+│ drawio.ts     │         │ svg.ts           │        │ codegen.ts     │
 │ IR ↔ .drawio  │         │ IR → SVG preview │        │ IR → code      │
 │ layout+route  │         │ (node layout     │        │ (declaration   │
 │               │         │  only, see note) │        │  layer only)   │
 └───────────────┘         └──────────────────┘        └────────────────┘
         ▲                                                      │
-        └──────────────────── cli.py ──────────────────────────┘
+        └──────────────────── cli.ts ──────────────────────────┘
                           build / sync
 ```
 
 | Módulo | Posee | **No** posee |
 | :--- | :--- | :--- |
-| `model.py` | tipos del IR y derivación de aristas | ninguna E/S |
-| `cparse.py` | sintaxis C → IR | disposición, dibujo |
-| `csparse.py` | sintaxis C# → IR | disposición, dibujo |
-| `parse.py` | despacho por extensión, fusión multilingüe | detalles de sintaxis |
-| `drawio.py` | disposición, enrutado, lectura/escritura de `.drawio` | sintaxis del código fuente |
-| `svg.py` | vista previa SVG | enrutado (véase abajo) |
-| `codegen.py` | reescritura de la capa de declaración | cuerpos de función (jamás) |
-| `cli.py` | tratamiento de argumentos, E/S de ficheros | ningún algoritmo |
+| `model.ts` | tipos del IR y derivación de aristas | ninguna E/S |
+| `cparse.ts` | sintaxis C → IR | disposición, dibujo |
+| `csparse.ts` | sintaxis C# → IR | disposición, dibujo |
+| `parse.ts` | despacho por extensión, fusión multilingüe | detalles de sintaxis |
+| `drawio.ts` | disposición, enrutado, lectura/escritura de `.drawio` | sintaxis del código fuente |
+| `svg.ts` | vista previa SVG | enrutado (véase abajo) |
+| `codegen.ts` | reescritura de la capa de declaración | cuerpos de función (jamás) |
+| `cli.ts` | tratamiento de argumentos, E/S de ficheros | ningún algoritmo |
 
-**La regla que mantiene esto sostenible**: `drawio.py` no contiene **ninguna bifurcación por lenguaje**. Un diagrama
-es una imagen del IR, y el IR es agnóstico al lenguaje. Si alguna vez aparece una comprobación de lenguaje en
-`drawio.py`, las tres implementaciones ya no podrán compartir una única especificación de disposición, y el
-benchmark dejará de tener sentido.
+**La regla que mantiene esto sostenible**: `drawio.ts` no contiene **ninguna bifurcación por lenguaje**. Un diagrama
+es una imagen del IR, y el IR es agnóstico al lenguaje. Una comprobación de lenguaje dentro del renderizador
+significaría que el dorado geométrico son en realidad dos contratos con un solo nombre.
 
 ## Flujo de datos: `build`
 
@@ -148,27 +147,28 @@ escriba cuerpos de función a partir de un dibujo está adivinando, y adivinar e
 Restringir la dirección inversa a las declaraciones hace que la operación sea demostrablemente segura: solo puede
 tocar líneas cuyo contenido completo el diagrama representa de verdad.
 
-## Tres implementaciones, una especificación
+## Una implementación, un contrato geométrico congelado
 
-Python, TypeScript y .NET 10 implementan cada uno esta arquitectura de forma independiente, con su propio idioma.
-Se les exige una salida idéntica mediante [`conformance.md`](conformance.md) y los casos
-dorados de `tests/golden/`.
+Hay una sola implementación, TypeScript, sujeta byte a byte a los casos dorados de `tools/golden/`
+([`conformance.md`](conformance.md)). Hasta el 2026-10-21 existían otras dos implementaciones (Python y .NET)
+comparadas contra los mismos dorados; se retiraron cuando la salida de TypeScript demostró ser idéntica
+byte a byte, y permanecen en el historial de git.
 
 La consecuencia honesta: **una optimización puede cambiar lo rápido que se calcula algo, nunca lo que
 se calcula.** Un índice espacial que acelera las consultas de obstáculos es aceptable; un enrutador más listo que produce
-aristas más bonitas no lo es, porque rompe la comparabilidad. Esta restricción es lo que hace
-que [benchmark.md](benchmark.es.md) tenga sentido.
+aristas más bonitas no lo es, porque invalida todos los dorados y todos los diseños hechos a mano
+registrados contra la geometría anterior.
 
 ### Divergencia conocida: la vista previa SVG
 
-`svg.py` comparte la disposición de **nodos** con `drawio.py` (ambos llaman a `_assign_default_positions`) pero
+`svg.ts` comparte la disposición de **nodos** con `drawio.ts` (ambos llaman a `_assign_default_positions`) pero
 **no el enrutador de aristas**. Dibuja las aristas de centro a centro, así que cruzan visiblemente formas de nodo que el
 `.drawio` rodea. El SVG es una lectura estructural, no una vista previa fiel. Proporcionar un enrutado real
-exige refactorizar `to_drawio` para exponer la geometría de aristas como una función compartida; ambas
-implementaciones reproducen actualmente el comportamiento simplificado a propósito.
+exige refactorizar `to_drawio` para exponer la geometría de aristas como una función compartida; hasta entonces,
+el comportamiento simplificado es deliberado.
 
 ## Relacionado
 
 - [annotations.md](annotations.es.md) — las claves de anotación que llevan dirección y metadatos
 - [drawio-format.md](drawio-format.es.md) — reglas de mapeo, coordenadas, enrutado, compresión
-- [../conformance.md](conformance.md) — cómo se mantienen unidas las tres implementaciones
+- [../conformance.md](conformance.md) — qué fijan los dorados y qué comportamientos no pueden ver

@@ -1,18 +1,19 @@
 # Conformance
 
-`drawcode` ships three independent implementations — Python, TypeScript, .NET 10 (C#). They must
-agree. This file defines **how agreement is measured**, so that "the three versions match" is a
-checkable claim rather than a feeling.
+`drawcode` has a single implementation, TypeScript, and a set of **frozen golden cases**. This file
+defines what the goldens pin, how they are compared, and which behaviours they cannot see.
+
+> Until 2026-10-21 the repository also carried Python and .NET implementations and this suite
+> compared the three. Those were retired from the working tree (they remain in git history), so the
+> goldens changed role: they are no longer a cross-check between implementations, they are the
+> regression contract for the one that remains.
 
 ## Why the bar is exact, not approximate
 
-A performance comparison is only meaningful if all three implementations do the *same work*. If the
-TypeScript version draws prettier edges because it routes differently, its benchmark numbers are not
-comparable. So all three follow **one layout and routing specification**, and geometry is compared
-exactly.
-
-The reference implementation is `python/src/drawcode/`. Port its algorithms function by function;
-do not redesign them.
+The golden cases record the **IR** and the **geometry** byte-for-byte. A layout tweak that "looks
+about the same" is still a diff: hand-made layouts recorded against the old geometry would stop
+matching, and `--layout-from` would silently move the user's nodes. Exactness is what makes the
+golden a contract rather than a screenshot.
 
 ## Comparison levels
 
@@ -26,161 +27,175 @@ do not redesign them.
 L1 catches parser bugs. L2 catches container-assignment bugs. L3 catches layout and routing bugs.
 Reporting which level failed is required — "output differs" is not a useful bug report.
 
+The suite also asserts **byte equality** with the committed `.drawio` golden (`L3 (strict)` in
+`conformance.test.ts`). The structural rules under [Normalisation rules](#normalisation-rules)
+define when two arbitrary diagrams are equal — for example, a hand-made one compared across nesting
+levels — not a licence to accept drift in the golden itself.
+
+## The L4 validator is not a rubber stamp
+
+`typescript/src/xsd.ts` is a hand-written subset validator, not a general XSD engine. To show it
+rejects rather than waves through, the suite feeds it deliberately broken documents — violated
+`fixed`, undeclared attributes, out-of-range enumerations and `positiveInteger`, malformed
+`xs:double`, extra children, missing required attributes — and asserts every one is rejected.
+Before the Python implementation was retired, the same mutation set was run through `lxml` as the
+authoritative engine: **9/9 verdicts agreed, no disagreements**. The mutations remain in
+`test/xsd.test.ts` and `test/conformance.test.ts`, so the check can be repeated.
+
 ## Artifact models are outside L1–L3
 
-`drawcode inspect` produces an `ArtifactModel`, not the source IR. It has no cross-implementation
-comparison because only the TypeScript implementation reads binaries; Python and .NET have no
-counterpart to compare against. Its contract is [`artifact-format.md`](artifact-format.md), and its
-stability is checked by `test/artifact.test.ts` and `test/artifact-elf.test.ts`:
+`drawcode inspect` produces an `ArtifactModel`, not the source IR. It shares concepts (signals,
+functions, edges) with the source pipeline but not an output contract, so it has its own golden
+discipline. Its contract is [`artifact-format.md`](artifact-format.md), and its stability is checked
+by `test/artifact.test.ts` and `test/artifact-elf.test.ts`:
 
 - the same bytes inspected twice produce byte-identical JSON;
 - a real PE sample produces the same read/write edges as parsing its C# sources;
 - ELF and ar fixtures are synthesized inside the tests, never committed as binaries.
 
-Treating these as L1–L3 goldens would imply that the other two implementations must reproduce
-them, which they cannot by design. The source pipeline and the artifact pipeline share concepts
-(signals, functions, edges), not an output contract.
-
 ## Golden cases
 
-`tests/golden/<name>/` is self-contained:
+`tools/golden/<name>/` is self-contained:
 
 ```
-tests/golden/small-c/
+tools/golden/small-c/
 ├── input/                 # adc.h adc.c dsp.h dsp.c
 ├── expected.ir.json       # L1 golden
 ├── expected.drawio        # L2 + L3 golden
 └── preview.svg            # SVG golden (rendered output, not compared byte-wise — see below)
 ```
 
-`expected.ir.json` is produced by `tools/dump_ir.py`, which deliberately records **no layout
-coordinates**: layout is the `.drawio` layer's business, and mixing the two would make a routing bug
-look like a parser bug.
+`expected.ir.json` deliberately records **no layout coordinates**: layout is the `.drawio` layer's
+business, and mixing the two would make a routing bug look like a parser bug.
 
-To regenerate the goldens after an intentional behaviour change:
+`tools/golden/` is the contract, not test code: the tests live in
+[`typescript/test/`](../typescript/test/) and locate cases through `CASES_DIR` in
+`test/helpers.ts`. Inside a case, only the four entries above belong; `small-cs/bin/` and
+`small-cs/obj/` are ignored build output of the sample project and are never committed.
+
+To regenerate the goldens after an **intentional** behaviour change:
 
 ```bash
-python tools/dump_ir.py tests/golden/small-c/input tests/golden/small-c/expected.ir.json \
-    tests/golden/small-c/input/adc.h tests/golden/small-c/input/adc.c \
-    tests/golden/small-c/input/dsp.h tests/golden/small-c/input/dsp.c
+node typescript/bin/drawcode.ts dump-ir \
+    tools/golden/small-c/input/adc.h tools/golden/small-c/input/adc.c \
+    tools/golden/small-c/input/dsp.h tools/golden/small-c/input/dsp.c \
+    --root tools/golden/small-c/input \
+    --out tools/golden/small-c/expected.ir.json
 ```
+
+The geometry golden is regenerated by `build` with the same inputs; review the diff before
+committing it. A golden that changes without a matching behaviour change is a bug, not a refresh.
 
 ## Normalisation rules
 
-Comparison is **structural, never byte-wise**. Two documents are equal iff, after normalisation:
+`expected.ir.json` is compared **byte-for-byte** — `dump-ir` emits sorted keys, two-space indent and
+a trailing newline, and the test asserts the exact bytes. `.drawio` comparison is **structural,
+never byte-wise**. Two diagrams are equal iff, after normalisation:
 
 1. **Attribute order is irrelevant.** Sort attributes by name before comparing an element.
 2. **Insignificant whitespace is irrelevant.** Compare text content stripped; ignore indentation.
-3. **Numbers compare by value, not spelling.** `420`, `420.0` and `4.2e2` are equal. The reference
-   implementation happens to print integers without a decimal point; that is not a requirement.
+3. **Numbers compare by value, not spelling.** `420`, `420.0` and `4.2e2` are equal.
 4. **`<mxPoint>` coordinates are parent-relative.** `read_layout` converts them to absolute canvas
    coordinates and `to_drawio` converts back. Compare *after* conversion — comparing raw values
    across differently-nested diagrams reports phantom drift.
 5. **Element order follows document order**, except where this spec says "sorted" (e.g. containers
    by id, nodes by `symbolId`, edges by `(src, dst, rw)`), in which case sort before comparing.
 6. **IDs are compared as strings**, but the specific `id` values (`n1`, `e1`, `grp1`) are *not*
-   part of the contract beyond being unique and stable within one run. Compare the *mapping*
-   from `symbolId` to geometry, not the raw `id` strings.
+   part of the contract beyond being unique and stable within one run. Compare the *mapping* from
+   `symbolId` to geometry, not the raw `id` strings.
 
 ## Required capabilities
 
-Both non-Python implementations must provide all of these. A missing capability is a failure even
-if no golden case exercises it yet.
+These are the behaviours the implementation provides and the tests must keep providing. A regression
+in any of them is a failure even if no golden case exercises it.
 
-| # | Capability | Reference |
+| # | Capability | Module |
 | :--- | :--- | :--- |
-| 1 | C parse: `/// @drawcode` annotation (the `dir` key and metadata), `/// @device` | `cparse.py` |
-| 2 | C# parse: `[Drawcode(Direction.X, ...)]` and `[Device(...)]` attributes | `csparse.py` |
-| 3 | IR assembly and edge derivation (`reads`/`writes` → edges) | `model.py` |
-| 4 | Default layout (container stacking, intra-container vertical packing) | `_assign_default_positions` |
-| 5 | Containers: one swimlane per source directory/file, nesting, edge assigned to innermost common container | `to_drawio` |
-| 6 | Routing: anchor selection, obstacle avoidance, cross-container gap routing, lane detours | `_route`, `_candidates`, `_cross_gap` |
-| 7 | `.drawio` write: `<object>` custom properties, `mxCell`, `mxGeometry`, `<Array as="points">` | `to_drawio` |
-| 8 | `.drawio` read: **both** plain and draw.io-compressed form, plus layout application | `read_layout`, `_unpack` |
-| 9 | Write-back to source, declaration layer only (never function bodies) | `codegen.py` |
-| 10 | SVG preview sharing **node** coordinates with the `.drawio` | `svg.py` |
+| 1 | C parse: `/// @drawcode` annotation (the `dir` key and metadata), `/// @device` | `cparse.ts` |
+| 2 | C# parse: `[Drawcode(Direction.X, ...)]` and `[Device(...)]` attributes | `csparse.ts` |
+| 3 | IR assembly and edge derivation (`reads`/`writes` → edges) | `model.ts` |
+| 4 | Default layout (container stacking, intra-container vertical packing) | `drawio.ts` |
+| 5 | Containers: one swimlane per source directory/file, nesting, edge assigned to innermost common container | `drawio.ts` |
+| 6 | Routing: anchor selection, obstacle avoidance, cross-container gap routing, lane detours | `drawio.ts` |
+| 7 | `.drawio` write: `<object>` custom properties, `mxCell`, `mxGeometry`, `<Array as="points">` | `drawio.ts` |
+| 8 | `.drawio` read: **both** plain and draw.io-compressed form, plus layout application | `drawio.ts` |
+| 9 | Write-back to source, declaration layer only (never function bodies) | `codegen.ts` |
+| 10 | SVG preview sharing **node** coordinates with the `.drawio` | `svg.ts` |
 
 ## Capability 8 is not optional
 
-draw.io compresses `<diagram>` content by default when saving. An implementation that only reads
-plain XML will return an **empty layout without error** after the user saves in draw.io, silently
-discarding hand-made layout. The compressed form is:
+draw.io compresses `<diagram>` content by default when saving. A reader that only handles plain XML
+will return an **empty layout without error** after the user saves in draw.io, silently discarding
+hand-made layout. The compressed form is:
 
 ```
-base64( raw-deflate( urllib-quote( xml ) ) )
+base64( raw-deflate( url-quote( xml ) ) )
 ```
 
-with `~()*!.'` as the only characters not percent-encoded. Spec: `_decompress` / `_unpack`.
+with `~()*!.'` as the only characters not percent-encoded.
 
-An unreadable `<diagram>` payload must raise an error, never return an empty layout.
+An unreadable `<diagram>` payload must throw, never return an empty layout. Both the regression test
+(reading a draw.io-compressed golden file back to `nodes=6, edges=6, attrs=6`) and the hand-drawn
+diagram rejection test pin this: a genuinely hand-drawn `.drawio` cannot silently supply a layout.
+The compressed fixtures in `typescript/test/fixtures/` were generated outside the implementation and
+are committed rather than regenerated, so the reader is not validating its own packer.
 
 ## SVG is compared structurally, not byte-wise
 
-SVG is a *rendered artefact*. Implementations may differ in attribute order, whitespace and path
-command spelling. Compare: element count by tag, the text nodes, and coordinates within 0.5px.
-Never require byte equality.
+SVG is a *rendered artefact*: attribute order, whitespace and path-command spelling may change
+without meaning anything. Compare element count by tag, the text nodes, and coordinates within
+0.5px. Never require byte equality.
 
 **Known divergence — SVG edge routing is simplified.** The SVG preview shares the *node* layout
-with the `.drawio` (both call `_assign_default_positions`), but **not the edge router**: `svg.py`
-draws each edge centre-to-centre with optional waypoints, while `to_drawio` runs the full anchor
-selection and obstacle avoidance in `_route`. Consequences, stated plainly:
+with the `.drawio` (both call the same default layout), but **not the edge router**: `svg.ts` draws
+each edge centre-to-centre with optional waypoints, while `to_drawio` runs the full anchor selection
+and obstacle avoidance. Consequences, stated plainly:
 
 - SVG edges start and end at node *centres*, so they visibly cross node shapes; `.drawio` edges do not.
 - The SVG is therefore **not** a faithful preview of the `.drawio`. It is a quick structural read.
 - To supply real routing to the SVG, `to_drawio` must be refactored to expose edge geometry as a
-  shared function. Until then, both implementations reproduce the simplified behaviour, and SVG
-  conformance tests must not assert edge geometry.
+  shared function. Until then, SVG tests must not assert edge geometry.
 
-**Aligned extensions — all three implementations now agree.** These five behaviours used to be
-TypeScript-only. They are implemented identically in `python/` and `dotnet/`, and each side pins them
-with dedicated tests. The shared goldens still cannot see them — `expected.ir.json` deliberately
-records no coordinates (see *Golden cases*), and `small-c` contains no two labels close enough to
-clash — so a regression here would not turn the golden comparison red. That is why the behaviours are
-listed explicitly instead of being left implied by "the outputs match":
+## Behaviours the goldens cannot see
 
-- **Edge-label de-clashing.** When two edge labels would overlap, every implementation moves each
-  label but the first out of its edge and into a sibling `<mxCell id="eN_label" … parent="eN">`,
-  where `<mxPoint as="offset">` holds a purely vertical shift, and blanks the edge object's own
-  `label`. The lane width (`17`), the font (`12`), the 2px clash tolerance and the alternating
-  `+1/−1/+2…` shift are shared constants. The SVG preview deliberately keeps labels inline — a
+These behaviours are real and tested, but no golden case would turn red if they regressed.
+`expected.ir.json` records no coordinates, and `small-c` contains no two labels close enough to
+clash. They are listed explicitly so "the goldens are green" is not mistaken for "these are
+covered":
+
+- **Edge-label de-clashing.** When two edge labels would overlap, each label but the first is moved
+  out of its edge into a sibling `<mxCell id="eN_label" … parent="eN">`, where
+  `<mxPoint as="offset">` holds a purely vertical shift, and the edge object's own `label` is
+  blanked. The lane width (`17`), the font (`12`), the 2px clash tolerance and the alternating
+  `+1/−1/+2…` shift are named constants. The SVG preview deliberately keeps labels inline — a
   separate, still-standing divergence (see the SVG section above).
-- **Geometry — `xy`, node `size`, `style`.** Read by every front end, in a `.c` *and* in a `.cs`, on
-  signals *and* on functions. Malformed values follow JavaScript `Number()` rather than raising:
-  Python routes through `_js_number`, .NET through `JsNumber`, so `"1_0"`, `"infinity"` and
-  `"0x10"` agree across languages (they are the three cases where `float()` and `Number()` differ).
-  A missing key or empty string leaves the default untouched (signal `160x60`, function `180x72`).
-- **`[Callout]`.** Parsed by every C# front end. Callouts are a **list**, not a dictionary, so several
-  may hang off one declaration; coordinates are absolute canvas coordinates; `band` is emitted before
-  the containers while `box`/`text` are emitted after the nodes. An unrecognised shape falls back to
-  `text`. The parse-dispatch merge concatenates the lists from the C and C# front ends.
+- **Geometry — `xy`, node `size`, `style`.** Read on signals *and* on functions. Malformed values
+  follow JavaScript `Number()` rather than raising (`"1_0"`, `"infinity"`, `"0x10"`). A missing key
+  or empty string leaves the default untouched (signal `160x60`, function `180x72`).
+- **`[Callout]`.** Callouts are a **list**, not a dictionary, so several may hang off one
+  declaration; coordinates are absolute canvas coordinates; `band` is emitted before the containers
+  while `box`/`text` are emitted after the nodes. An unrecognised shape falls back to `text`. The
+  parse-dispatch merge concatenates the lists from the C and C# front ends.
 - **Geometry write-back.** `sync` (and the layout half of `--layout-from`) records `xy`/`size` on
-  entities whose diagram geometry differs from what `build` would have written. All three
-  implementations write the pair back, and all three merge at **parameter level** — a hand-written
-  `Style`, a compact `Unit="LSB"`, or a `[Device]` line above the `[Drawcode]` attribute survives
-  untouched. `style` itself is never written: it is input-only, like `clientX` on an element.
-- **Build switches.** `--inline`, `--cards`, `--no-rw-labels` and `--straight-edges` are accepted by
-  all three CLIs with the same semantics. Absent flags produce byte-identical output to the old
+  entities whose diagram geometry differs from what `build` would have written. The merge happens at
+  **parameter level** — a hand-written `Style`, a compact `Unit="LSB"`, or a `[Device]` line above
+  the `[Drawcode]` attribute survives untouched. `style` itself is never written: it is input-only,
+  like `clientX` on an element.
+- **Build switches.** `--inline`, `--cards`, `--no-rw-labels` and `--straight-edges` are covered by
+  CLI tests rather than goldens. Absent flags produce byte-identical output to the default
   behaviour, which is what keeps the goldens meaningful.
+- **`Path = "a/b"`** maps to the container path and is covered by a dedicated parse test.
 
-**Unknown keys still degrade silently.** Every implementation ignores annotation keys and attributes
-it does not recognise rather than rejecting them. That is deliberate forward compatibility, but it
-also means a *future* extension would again be ignored by whichever implementation lacked it. The
-five behaviours above are no longer in that class; when adding a sixth, port it to all three and give
-each side a test, because no golden case will catch the omission.
-
-- **`Path = "a/b"` is aligned.** All three front ends map `Path` to the container path (TypeScript
-  and .NET once omitted it from their key whitelists while Python stored every named argument; the
-  whitelists now list it, and each side has a regression test). Nothing to work around.
+**Unknown keys degrade silently.** Annotation keys and attributes the parser does not recognise are
+ignored rather than rejected. That is deliberate forward compatibility, but it also means a new key
+without a test is effectively unverified. When adding one, add a test at the same time — no golden
+case will catch the omission.
 
 ## Running the comparison
 
-Each implementation ships a conformance runner that reports per-level results:
-
-```
-python/      python -m unittest discover -s tests -t .
-typescript/  npm test
-dotnet/      dotnet test
+```bash
+cd typescript && node --test        # includes conformance.test.ts
 ```
 
-Each runner must fail loudly if a golden file is missing, rather than skipping the case. A skipped
-conformance test is worse than a failing one: it makes an unverified implementation look verified.
+The runner must fail loudly if a golden file is missing, rather than skipping the case. A skipped
+conformance test is worse than a failing one: it makes unverified behaviour look verified.

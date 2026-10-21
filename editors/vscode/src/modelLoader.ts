@@ -35,7 +35,7 @@ const METADATA_TOOL_SEGMENTS = [
   "drawcode-metadata",
   "bin",
   "Release",
-  "net8.0",
+  "net10.0",
   "drawcode-metadata.dll",
 ] as const;
 

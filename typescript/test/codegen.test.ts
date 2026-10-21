@@ -436,8 +436,8 @@ const DEVICES_CS = `namespace Drawcode
 {
     public static class Devices
     {
-        [Drawcode(Alias = "采集计算机", Asset = "图片/设备-采集计算机.png", Note = "采集设备主机", Xy = "1480,260", Size = "220x165")]
-        [Device(Model = "示例型号")]
+        [Drawcode(Alias = "数据采集计算机", Asset = "图片/设备-数据采集计算机.png", Note = "采集设备主机", Xy = "1480,260", Size = "220x165")]
+        [Device(Model = "示例机型 A")]
         public static Hardware dev_collector()
         {
             return null;
@@ -682,11 +682,11 @@ test("codegen: a dragged C# method merges its Drawcode line, [Device] and signat
 
     assert.ok(
       after.includes(
-        '        [Drawcode(Alias = "采集计算机", Asset = "图片/设备-采集计算机.png", Note = "采集设备主机", Xy = "1400,240", Size = "240x180")]',
+        '        [Drawcode(Alias = "数据采集计算机", Asset = "图片/设备-数据采集计算机.png", Note = "采集设备主机", Xy = "1400,240", Size = "240x180")]',
       ),
     );
     assert.ok(after.includes('        [Drawcode(Alias = "设备二", Xy = "150,150", Size = "160x80")]'));
-    assert.ok(after.includes('        [Device(Model = "示例型号")]'));
+    assert.ok(after.includes('        [Device(Model = "示例机型 A")]'));
     assert.ok(after.includes("public static Hardware dev_collector()"));
     // 空行隔断的注解：解析侧不认（readMeta 遇空行清缓冲），回写侧同样不碰
     assert.ok(after.includes('        [Drawcode(Alias = "分离注解", Xy = "10,20")]'));

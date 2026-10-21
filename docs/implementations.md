@@ -1,146 +1,118 @@
 ---
 type: Guide
-title: Implementations
-description: How to build, test and invoke each of the Python, TypeScript and .NET implementations, and how they are held to identical output
-tags: [implementations, python, typescript, dotnet, conformance]
+title: Implementation
+description: How to build, test and invoke the TypeScript implementation, and what the golden cases still pin
+tags: [implementations, typescript, conformance]
 status: stable
 ---
 
-# Implementations
+# Implementation
 
 **English** | [中文](implementations.zh-CN.md) | [Español](implementations.es.md)
 
 [← Documentation index](index.md)
 
-`drawcode` ships the same capability three times, once per language, so the performance comparison
-in [benchmark.md](benchmark.md) compares implementations rather than ecosystems.
+`drawcode` ships one implementation: TypeScript. Node runs the `.ts` entry point directly, so the
+CLI has no build step and no `node_modules` on its path.
 
-| | Python | TypeScript | .NET |
-| :--- | :--- | :--- | :--- |
-| Directory | [`python/`](../python/) | [`typescript/`](../typescript/) | [`dotnet/`](../dotnet/) |
-| Requires | Python 3.10+ | Node 22.6+ | .NET SDK 10 |
-| Runtime dependencies | **none** (stdlib only) | **none** (no `node_modules`) | **none** (BCL only) |
-| Entry point | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
-| Tests | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| Test count | 145 | 210 | 120 |
-| Per-implementation guide | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
-
-Every command in the table runs from the repository root. Each implementation directory also has a
-`README.md`, and a `SKILL.md` covering the port walkthrough.
-
-## The shared contract
-
-All three offer the same two operations:
-
-```
-build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
-                [--inline] [--cards] [--no-rw-labels] [--straight-edges]
-sync  <drawio> <files...> [--root DIR] [--write]
-```
-
-| Operation | Does |
+| | TypeScript |
 | :--- | :--- |
-| `build` | parse sources → IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout; `--svg` also emits a preview. |
-| `sync` | read `.drawio` → apply layout and annotation attributes → write back the **declaration layer** only. Dry run unless `--write` is given. |
+| Directory | [`typescript/`](../typescript/) |
+| Requires | Node 22.6+ (native type stripping) |
+| Runtime dependencies | **none** (Node standard library only) |
+| Entry point | `node typescript/bin/drawcode.ts` |
+| Tests | `cd typescript && node --test` |
+| Test count | 211 (3 skipped; the runner reports 212 because it counts `test/helpers.ts`) |
+| Guide | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 
-The four content/layout switches are accepted by all three CLIs with identical semantics:
-`--inline` folds a signal written once and read once into a direct device-to-device edge,
-`--cards` renders functions with an `asset` as image cards, `--no-rw-labels` drops the
-`read`/`write` edge labels, and `--straight-edges` replaces orthogonal routing with straight
-lines (hand-made waypoints and exit/entry anchors survive; automatic elbows do not). Absent flags
-produce byte-identical output to the pre-switch behaviour, which is what keeps the shared goldens
-meaningful.
+## Commands
 
-## Python
-
-Reference implementation. Standard library only, so it runs from a source checkout with no install:
-
-```bash
-export PYTHONPATH=python/src          # Windows: $env:PYTHONPATH = "python/src"
-python -m drawcode.cli build examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow.drawio --svg out/flow.svg
-
-cd python && python -m unittest discover -s tests -t .
 ```
-
-Verified: `pip install -e .` inside `python/` also exposes a `drawcode` console script, and
-`drawcode --help` lists both subcommands.
-
-## TypeScript
-
-Lives in [`typescript/`](../typescript/).
-
-**There is no install step and no `node_modules`.** Node 22.6 or later strips the type annotations
-itself, so the `.ts` entry point is run directly and nothing is compiled to JavaScript first.
+build   <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
+                    [--inline] [--cards] [--no-rw-labels] [--straight-edges]
+sync    <drawio> <files...> [--root DIR] [--write]
+dump-ir <files...> [--root DIR] [--out FILE]
+inspect <artifact> [--out FILE] [--infer-edges]
+```
 
 ```bash
 node typescript/bin/drawcode.ts build examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow-ts.drawio
+    --root examples/small/c --merge --out out/flow.drawio --svg out/flow.svg
 
-cd typescript && node --test
+node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
+    --root examples/small/c          # dry run; add --write to apply
+
+node typescript/bin/drawcode.ts inspect tools/golden/small-cs/bin/Debug/net10.0/small-cs.dll
 ```
 
-`npm run typecheck` does need an external `typescript` package, which the repository deliberately
-does not vendor; it is not on the test path.
+| Flag | Effect |
+| :--- | :--- |
+| `build --merge` | merge all modules into one diagram (default: one per module) |
+| `build --layout-from FILE` | reuse the hand-made layout from an existing diagram, then rebuild from source (idempotent) |
+| `build --inline` | collapse one-writer/one-reader signals into direct function-to-function edges |
+| `build --cards` | render functions that carry `Asset` as image cards |
+| `build --no-rw-labels` | drop the `read`/`write` labels, keep the lines |
+| `build --straight-edges` | straight lines instead of orthogonal routing (see below) |
+| `build --svg FILE` | also emit a read-only SVG preview |
+| `sync` | diagram → source, declaration layer only; dry run unless `--write` |
+| `inspect` | read `.dll` / `.so` / `.out` / `.a` / `.o` into canonical JSON; never loads or executes the target |
 
-## .NET
+With `--inline` and `--layout-from` together, folding happens first and layout is applied to the
+result; removed nodes must be laid out again rather than leaving holes.
 
-Lives in [`dotnet/`](../dotnet/), as a `.slnx` solution targeting `net10.0`.
+## Dependencies
 
-Build once, then run the assembly that build produces:
+No runtime dependencies is a deliberate property, not an accident. Node 22.6+ strips types at load
+time, so the `.ts` entry point runs without a build step or `node_modules`. The XML reader/writer and
+the XSD subset validator are hand-written because the document shapes are small and the goldens are
+byte-aligned; a library would bring its own quirks. `node --test` is the runner.
 
-```bash
-dotnet build dotnet/DrawCode.slnx -c Release
+`@types/node` and `typescript` are devDependencies for `npm run typecheck` and editor completion
+only; the test path does not load them. The one exception is `inspect` on PE/CLI files, which spawns
+[`tools/drawcode-metadata`](../tools/drawcode-metadata/) — a .NET 10 sidecar outside npm. ELF and
+`ar` archives are read in-process.
 
-dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll build \
-    examples/small/c/*.h examples/small/c/*.c \
-    --root examples/small/c --out out/flow-net.drawio
+## Tests
 
-dotnet test dotnet/DrawCode.slnx -c Release
-```
+`cd typescript && node --test` runs 211 tests (3 skipped): 18 conformance and 193 unit. The runner
+reports 212 because `test/helpers.ts` contains no tests but matches the discovery pattern.
 
-Both implementations above ship a `SKILL.md` documenting the Node- and .NET-specific traps
-(regex semantics, XML serialisation, no `DOMParser`; `XDocument` writing an XML declaration the
-golden files do not have, `CultureInfo.InvariantCulture` for float formatting, and raw deflate
-requiring `DeflateStream` rather than `ZLibStream`).
+## Build switches
 
-## How identity is enforced
+### `--straight-edges` cannot become the default
 
-Three implementations agreeing is not a vibe; it is a test. All three are held to
-[`conformance.md`](conformance.md) and the golden cases under `tests/golden/`:
+The default is orthogonal routing. Both goldens record `orthogonalEdgeStyle` and explicit
+`<Array as="points">`; changing the default would turn them red and invalidate every hand-made
+layout recorded against the old geometry. The flag is therefore opt-in. Four style changes must
+move together: drop `edgeStyle=orthogonalEdgeStyle`, `rounded=1` and `jumpStyle=arc`, but keep the
+`exitX`/`exitY`/`entryX`/`entryY` anchors. Straight edges suit row-per-node topologies; on
+band-and-card layouts they become a diagonal mesh and can cross cards and labels.
 
-| Level | Compared | Tolerance |
-| :--- | :--- | :--- |
-| L1 — parse (IR) | signals, funcs, params, edges, devices, files | exact |
-| L2 — graph structure | containers, nesting, node membership, edge endpoints | exact |
-| L3 — geometry | node `x`/`y`/`w`/`h`, polyline points, edge anchors | exact |
-| L4 — schema | validates against `tools/xsd/mxfile.xsd` | must pass |
+## Scope limits
 
-**All three implementations reproduce the `small-c` and `small-cs` golden cases byte-for-byte** —
-identical SHA256 for both `expected.drawio` and `expected.ir.json`. That is stricter than the
-normalised comparison the spec requires: it is L3 geometry agreement down to the last digit, not
-merely structural equality.
+- No multi-page diagrams, draw.io layers, or tag filtering: none are wired to the CLI.
+- Mixed-language input is merged, but a symbol referenced across languages is not resolved.
+- `npm run typecheck` needs `npm install` first; the tests do not.
 
-**A conformance runner must fail loudly when a golden file is missing rather than skipping.**
-A silently skipped conformance test makes an unverified implementation look verified. This actually
-happened during the project's own development: the XSD validation tests resolved the schema from a
-sibling repository, so three tests skipped for anyone without that checkout. The schema is now
-vendored at [`tools/xsd/mxfile.xsd`](../tools/xsd/mxfile.xsd) and all three tests execute.
+## What the golden cases pin
 
-## Why identical output matters more than it seems
+[`tools/golden/`](../tools/golden/) holds `small-c` and `small-cs`: input sources, canonical IR,
+expected `.drawio` and a preview SVG. The suite compares L1 (IR), L2 (graph structure) and L3
+(geometry) exactly, and L4 (schema) against [`tools/xsd/mxfile.xsd`](../tools/xsd/mxfile.xsd).
+Regenerating a golden is a deliberate act; see [contributing.md](contributing.md).
 
-The benchmark is only meaningful if the three implementations do the **same work**. A faster router
-that draws prettier edges would post better numbers and prove nothing.
+## Retired implementations
 
-So the constraint is explicit: **optimisation may change how fast something is computed, never what
-is computed.** A spatial index that speeds up obstacle queries is legitimate. A different routing
-heuristic is not — it would silently turn the benchmark into a comparison of three different
-programs.
+Until 2026-10 the repository also shipped independent Python and .NET implementations. They existed
+to cross-check one contract and to compare performance. When the product converged on the TypeScript
+implementation — the VS Code extension and the binary artifact reader — maintaining three parsers
+stopped paying for itself, and both trees were removed from the working tree on 2026-10-21.
 
-This is a real limitation on how the implementations may evolve, and it is accepted deliberately.
+Their removal changes what is *measured*, not what is *required*: the golden cases still pin the IR
+and the geometry. The retired trees remain available in git history before that date.
 
 ## Related
 
-- [`conformance.md`](conformance.md) — the full comparison specification
-- [benchmark.md](benchmark.md) — measured numbers
-- [architecture.md](architecture.md) — why the design is shaped this way
+- [`conformance.md`](conformance.md) — what the suite compares and how
+- [`artifact-format.md`](artifact-format.md) — the binary artifact model
+- [`contributing.md`](contributing.md) — environment, tests and goldens

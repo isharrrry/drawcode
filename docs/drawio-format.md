@@ -226,7 +226,7 @@ On the writing side, the quote set matters equally. The characters left unescape
 | `<diagram>` with empty text | skipped — some files contain placeholder diagrams |
 | `<diagram>` with text that will not inflate | **raises `ValueError`** |
 
-That last row is the design decision worth stating plainly: returning an empty layout would be indistinguishable from a diagram that genuinely has no layout, and the caller would overwrite hand-made work with defaults. Raising makes the corruption visible at the point of failure. `conformance.md` lists this as a required capability rather than a nicety, and requires the same behaviour from all three implementations.
+That last row is the design decision worth stating plainly: returning an empty layout would be indistinguishable from a diagram that genuinely has no layout, and the caller would overwrite hand-made work with defaults. Raising makes the corruption visible at the point of failure. `conformance.md` lists this as a required capability rather than a nicety.
 
 Because the two forms inflate to the same tree, `read_layout` is form-agnostic: the same file saved by drawcode and re-saved by draw.io yields identical nodes, edges and attributes. That equality is asserted against a draw.io-compressed golden file.
 
@@ -263,4 +263,5 @@ One rule from that list deserves repeating here because it is a `.drawio`-format
 - [annotations.md](annotations.md) — where the attributes on `<object>` come from
 - [architecture.md](architecture.md) — why only the declaration layer is written back
 - [`conformance.md`](conformance.md) — comparison levels and normalisation rules
-- [`tools/render/README.md`](../tools/render/README.md) — rendering a `.drawio` without draw.io installed
+- [Contributing § Offline rendering](contributing.md#offline-rendering) — rendering a `.drawio`
+  without draw.io installed
