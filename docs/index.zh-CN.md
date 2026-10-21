@@ -4,7 +4,7 @@
 
 > [drawcode](../README.zh-CN.md) 的文档 —— 一个代码 ↔ 数据流图双向工具，源码是唯一的真相来源。
 
-下列每个主题都有三种语言版本。英文版先写、写完整；
+下列每个主题都有三种语言版本，标注「暂无中文版」的除外。英文版先写、写完整；
 另外两版是忠实翻译而非摘要。三版始终在同一次改动里一起更新。
 
 ## 主题
@@ -16,6 +16,7 @@
 | **`.drawio` 格式** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | 元素映射、坐标系语义、锚点与路由规则，以及 draw.io 的压缩存储形态 |
 | **基准测试** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | 三套实现的实测性能，含原始数字与耗时实际去向 |
 | **各语言实现** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | 如何构建、测试与调用 Python、TypeScript、.NET 三套实现 |
+| **程序集产物格式** | [English](artifact-format.md)（暂无中文版） | `inspect` 输出的 `ArtifactModel`：支持的二进制、稳定 id、诊断、规范化 JSON，以及这条路径为何与源码 IR 分离 |
 | **参与贡献** | [English](contributing.md) · [中文](contributing.zh-CN.md) · [Español](contributing.es.md) | 环境、跑测试、加金标准用例、加一门源语言，以及刻意未验证的事项 |
 
 ## 从哪里开始

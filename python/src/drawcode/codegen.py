@@ -32,6 +32,7 @@
 import re
 
 from .cparse import FUNC_RE, SIGNAL_RE
+from .csparse import _bracket_delta
 from .drawio import _num
 
 CTYPE_RE = re.compile(r"^(?P<base>.+?)(?P<arr>\[[^\]]*\])?$")
@@ -351,6 +352,20 @@ CS_FIELD_LINE_RE = re.compile(
     r"^\s*(?:(?:public|private|internal|protected|static|readonly|const|volatile)\s+)*"
     r"(?P<ctype>[^\W\d][\w\.<>,\[\]\?]*)\s+(?P<name>[^\W\d]\w*)\s*(?P<init>=[^;]*)?;\s*$"
 )
+# 语句关键字开头、却会被字段正则误认成「类型 + 名字」的行。
+# `return g_raw;` 在 CS_FIELD_LINE_RE 眼里就是 `ctype=return, name=g_raw`。解析侧天然
+# 不受影响（要求特性里有 Direction，方法体里没有特性），但**回写侧只按名字匹配**：
+# 若把 `return g_raw;` 当成字段声明，就会在方法体里插一条 `[Drawcode(...)]` —— 写坏源码。
+CS_STMT_LINE_RE = re.compile(r"^(?:return|throw|yield|await|goto|break|continue)\b")
+
+
+def _is_cs_field_line(line):
+    """真正的字段声明行：既要匹配字段正则，又不能是语句行。返回 Match 或 None。"""
+    if CS_STMT_LINE_RE.match(line.strip()):
+        return None
+    return CS_FIELD_LINE_RE.match(line)
+
+
 CS_PROP_MAP = {"unit": "Unit", "alias": "Alias", "note": "Note", "external": "External"}
 # C# declares arrays as `T[]`, not `T[N]`; a model signal may still carry the C spelling.
 # （C# 数组是 `T[]` 而不是 `T[N]`；IR 里可能还留着 C 的写法，追加声明时要转过来，
@@ -536,9 +551,39 @@ def _merge_cs_annotation_line(line, updates):
     return line
 
 
-def _find_cs_drawcode_above(lines, frm):
-    """从第 ``frm`` 行向上扫过连续的 ``[...]`` 属性行，返回最近一行 ``[Drawcode(`` 的
-    行号，找不到返回 None。
+def _cs_attr_statements(lines):
+    """扫出每条 ``[...]`` 特性语句的行范围 ``(start, end)``，按**结束行**建索引。
+
+    为什么要认出「整条语句」而不是「单行」：参数一多，作者与 IDE 都会换行，
+
+        [Drawcode(Direction.In, Unit = "LSB",
+            Note = "上电后需校准")]
+        public static short g_raw;
+
+    只按「行首是不是 ``[``」向上找，第二行（以 ``Note`` 开头）就会让扫描停下，
+    判定「上面没有 Drawcode」，随后在字段上方**再插一条** ``[Drawcode]`` —— 同一字段
+    挂两条特性，源码编译不过（`sync` 的幂等性也直接崩掉）。配平规则与解析侧共用
+    ``_bracket_delta``：两边对「什么算跨行」的判定必须一致。
+    """
+    by_end = {}
+    i = 0
+    while i < len(lines):
+        if not lines[i].strip().startswith("["):
+            i += 1
+            continue
+        start = i
+        acc = lines[i].strip()
+        # 引号感知：`Tooltip = "a]b"` 里的 `]` 不参与配平（与解析侧同一函数）。
+        while _bracket_delta(acc) > 0 and i + 1 < len(lines):
+            i += 1
+            acc += " " + lines[i].strip()
+        by_end[i] = (start, i)
+        i += 1
+    return by_end
+
+
+def _find_cs_drawcode_span(lines, frm, stmts):
+    """从第 ``frm`` 行向上扫过连续的特性语句，返回最近一条 ``[Drawcode(`` 的行范围。
 
     为什么不能只看「上一行」：设备卡片的真实形状是
         [Drawcode(...)]            ← 要合并的目标
@@ -546,16 +591,35 @@ def _find_cs_drawcode_above(lines, frm):
         public static Hardware dev_xxx()
     ``[Device]`` 卡在中间，「签名的上一行」这个定位法直接失效：会把方法误判成「没有
     注解」，然后（若照旧逻辑）在上面插一行重复的 ``[Drawcode]``。所以必须扫过**连续的**
-    属性行。停扫条件与解析侧一致：readMeta 同样只把连续无空行、无注释的 ``[...]`` 块当
+    特性语句。停扫条件与解析侧一致：readMeta 同样只把连续无空行、无注释的 ``[...]`` 块当
     同一个注解块，两边用同一条边界才能在「解析认得出」的行上写回。多个 ``[Drawcode]``
-    时取**最近**的一行：解析侧同类键是后写覆盖前写，即离声明最近者胜。
+    时取**最近**的一条：解析侧同类键是后写覆盖前写，即离声明最近者胜。
     """
     j = frm - 1
-    while j >= 0 and lines[j].strip().startswith("["):
-        if CS_ATTR_RE.match(lines[j]):
-            return j
-        j -= 1
+    while j >= 0:
+        span = stmts.get(j)
+        if span is None:
+            return None
+        start, _end = span
+        if CS_ATTR_RE.match(lines[start]):
+            return span
+        j = start - 1
     return None
+
+
+def _merge_cs_annotation_block(block, updates):
+    """对**整条**特性语句做参数级合并：多行按 ``\\n`` 拼起来交给
+    ``_merge_cs_annotation_line``，结果再按行拆回。
+
+    拼合不会打乱排版：``_merge_cs_args`` 对未变化的实参逐字节原样输出，换行与缩进本来
+    就落在某个实参片段的前导空白里；只有值确实变化的那段被重写成 ``Key = "新值"``，
+    它的前导空白（含换行）同样保留。返回 None 表示一个字都没变。
+    """
+    joined = "\n".join(block)
+    merged = _merge_cs_annotation_line(joined, updates)
+    if merged == joined:
+        return None
+    return merged.split("\n")
 
 
 def sync_cs_source(path, model, rel):
@@ -571,14 +635,16 @@ def sync_cs_source(path, model, rel):
     lines = text.splitlines()
     wanted = {s.name: s for s in model.signals.values() if s.file == rel}
 
-    # 定位每个已有字段：dc_idx = 上方最近的 [Drawcode( 行（没有则 None），field_idx = 字段行
+    # 定位每个已有字段：dc_span = 上方最近的 [Drawcode( 语句范围（没有则 None），
+    # field_idx = 字段行
+    stmts = _cs_attr_statements(lines)
     spans = []
     for i, line in enumerate(lines):
-        m = CS_FIELD_LINE_RE.match(line)
+        m = _is_cs_field_line(line)
         if not m or m.group("name") not in wanted:
             continue
         spans.append({
-            "dc_idx": _find_cs_drawcode_above(lines, i),
+            "dc_span": _find_cs_drawcode_span(lines, i, stmts),
             "field_idx": i,
             "name": m.group("name"),
         })
@@ -588,10 +654,12 @@ def sync_cs_source(path, model, rel):
     for span in reversed(spans):
         sig = wanted[span["name"]]
         pinned = model.pinned.get(sig.id)
-        if span["dc_idx"] is not None:
-            merged = _merge_cs_annotation_line(new_lines[span["dc_idx"]], _cs_signal_args(sig, pinned))
-            if merged != new_lines[span["dc_idx"]]:
-                new_lines[span["dc_idx"]] = merged
+        if span["dc_span"] is not None:
+            start, end = span["dc_span"]
+            block = new_lines[start:end + 1]
+            merged = _merge_cs_annotation_block(block, _cs_signal_args(sig, pinned))
+            if merged is not None:
+                new_lines[start:end + 1] = merged
             continue
         # 字段上方没有 Drawcode 注解行：插一行新的，字段行本身一格不动
         field_line = lines[span["field_idx"]]
@@ -608,7 +676,7 @@ def sync_cs_source(path, model, rel):
         # 插到最后一个字段行之后；找不到字段就插到类体收尾 `}` 之前
         anchor = None
         for i, line in enumerate(new_lines):
-            if CS_FIELD_LINE_RE.match(line):
+            if _is_cs_field_line(line):
                 anchor = i + 1
         if anchor is None:
             for i in range(len(new_lines) - 1, -1, -1):
@@ -619,7 +687,7 @@ def sync_cs_source(path, model, rel):
             anchor = len(new_lines)
         indent = "        "
         for line in new_lines:
-            if CS_FIELD_LINE_RE.match(line):
+            if _is_cs_field_line(line):
                 indent = line[: len(line) - len(line.lstrip())]
                 break
         add = []
@@ -669,6 +737,7 @@ def sync_cs_methods(path, model, rel):
         text = fh.read()
     lines = text.splitlines()
     new_lines = list(lines)
+    stmts = _cs_attr_statements(lines)
     for i, line in enumerate(lines):
         m = CS_FUNC_RE.match(line.strip())
         if m is None:
@@ -676,15 +745,17 @@ def sync_cs_methods(path, model, rel):
         f = funcs.get(m.group("name"))
         if f is None:
             continue
-        dc_idx = _find_cs_drawcode_above(lines, i)
-        if dc_idx is None:
+        span = _find_cs_drawcode_span(lines, i, stmts)
+        if span is None:
             continue
         updates = _geom_kv("Xy", "Size", model.pinned.get(f.id))
         if not updates:
             continue
-        merged = _merge_cs_annotation_line(new_lines[dc_idx], updates)
-        if merged != new_lines[dc_idx]:
-            new_lines[dc_idx] = merged
+        start, end = span
+        block = new_lines[start:end + 1]
+        merged = _merge_cs_annotation_block(block, updates)
+        if merged is not None:
+            new_lines[start:end + 1] = merged
 
     if new_lines == lines:
         return False

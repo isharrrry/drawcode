@@ -1,0 +1,52 @@
+{
+  /*
+   * 解析核心的 CommonJS 构建。
+   *
+   * 为什么单独一份 tsconfig：
+   *   - 扩展宿主加载的是 CommonJS（package.json 无 "type": "module"），而仓库里的
+   *     核心按 NodeNext/ESM 写；同一份源码要产出两种模块格式，只能分两次编译。
+   *   - 核心源码在 `../../typescript/src`，不在扩展的 rootDir 内；沿用扩展的 tsconfig
+   *     会因 rootDir 冲突报错，也会把整个 CLI 一起编进来。
+   *
+   * rewriteRelativeImportExtensions 是关键：核心内部写的是 `./ar.ts`（为了能被
+   * node 直接运行、也为了 tsc 检查真实路径），CommonJS 程序集里必须变成 `./ar.js`。
+   * 打开它以后，TS 才会把 `.ts` 后缀改写成 `.js` 再 emit。
+   *
+   * 注意：这里不能开 verbatimModuleSyntax。它在 CommonJS 目标下禁止 ESM import
+   * 语法，而核心源码是标准 ESM 写法；程序集由 tsc 转成 require 正是我们要的。
+   */
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": "../../typescript/src",
+    "outDir": "dist/core",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "rewriteRelativeImportExtensions": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": [
+    "../../typescript/src/artifact/**/*.ts",
+    "../../typescript/src/order.ts",
+    "../../typescript/src/parse.ts",
+    "../../typescript/src/drawio.ts",
+    "../../typescript/src/cparse.ts",
+    "../../typescript/src/csparse.ts",
+    "../../typescript/src/model.ts",
+    "../../typescript/src/fsutil.ts",
+    "../../typescript/src/regex.ts",
+    "../../typescript/src/html.ts",
+    "../../typescript/src/num.ts",
+    "../../typescript/src/xml.ts"
+  ]
+}

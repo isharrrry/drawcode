@@ -53,7 +53,10 @@ function runBuild(tmp: string, ...args: string[]): number {
       argv.push(path.join(tmp, a));
     }
   }
-  return main(argv);
+  const code = main(argv);
+  // build 永远走同步分支；把这条不变量写出来，避免将来给 build 加异步读取时静默变成 Promise。
+  if (typeof code !== "number") throw new Error("build must be synchronous");
+  return code;
 }
 
 test("cli: one module gives one named diagram", () => {

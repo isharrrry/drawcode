@@ -4,8 +4,9 @@
 
 > Documentation for [drawcode](../README.md) — a bidirectional code ↔ dataflow-diagram tool where source code is the single source of truth.
 
-Every topic below exists in all three languages. The English version is written first and in full;
-the other two are faithful translations, not summaries. All three are updated in the same change.
+Every topic below exists in all three languages unless marked *(no translation yet)*. The English
+version is written first and in full; the other two are faithful translations, not summaries.
+All three are updated in the same change.
 
 ## Topics
 
@@ -16,6 +17,7 @@ the other two are faithful translations, not summaries. All three are updated in
 | **`.drawio` format** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Element mapping, coordinate semantics, anchor and routing rules, and draw.io's compressed storage form |
 | **Benchmark** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | Measured performance across the three implementations, with the raw numbers and where the time actually goes |
 | **Implementations** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | How to build, test and invoke each of the Python, TypeScript and .NET versions |
+| **Artifact format** | [English](artifact-format.md) *(no translation yet)* | The `ArtifactModel` emitted by `inspect`: supported binaries, stable ids, diagnostics, canonical JSON, and why this path is separate from the source IR |
 | **Contributing** | [English](contributing.md) · [中文](contributing.zh-CN.md) · [Español](contributing.es.md) | Environment, running tests, adding golden cases, adding a source language, and what is deliberately unverified |
 
 ## Where to start

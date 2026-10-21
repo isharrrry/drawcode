@@ -101,6 +101,52 @@ function parseAttrLine(line: string): [string, string][] {
 }
 
 /**
+ * 一条特性文本的 `[`/`]` 净值，跳过双引号字符串里的方括号。
+ *
+ * 为什么不能直接数字符：`Note = "采样[0]"` 这类合法元数据会让计数提前归零，
+ * 把后半条特性当成独立声明处理。字符串内的 `\"` 也要跳过，否则会把转义引号
+ * 误判成字符串结束。
+ */
+function indexOutsideString(text: string, targets: string): number {
+  let inString = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (inString) {
+      if (ch === "\\") i += 1;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (targets.includes(ch)) return i;
+  }
+  return -1;
+}
+
+/**
+ * 方括号配平差值（引号内的 `[`/`]` 不计）。
+ *
+ * 导出给 codegen 用：回写侧要判断「这一行是不是一条跨行属性的开头」，
+ * 必须与解析侧用**同一套**引号/转义规则，否则会出现「解析认得出、回写找不到」
+ * 的静默丢改动（两条正则各写一份迟早漂移）。
+ */
+export function bracketDelta(text: string): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i] as string;
+    if (inString) {
+      if (ch === "\\") i += 1;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "[") depth += 1;
+    else if (ch === "]") depth -= 1;
+  }
+  return depth;
+}
+
+/**
  * `Xy = "x,y"` / `Size = "宽x高"`。
  *
  * 容差与 C 侧 cparse.ts 的写法**逐字对齐**（逗号分隔、小写 `x` 分隔、一律 `Number()` 且不校验），
@@ -297,13 +343,27 @@ export function parseCsProject(paths: string[], root?: string): Model {
 
   for (const [rel, lines] of loaded) {
     let buf: string[] = [];
+    // 一条特性可能跨多行（参数多时最常见）。`[`/`]` 未配平就继续吞下一行，
+    // 等配平后把整条拼成一行交给 readMeta —— ATTR_RE 的 `.` 不跨行。
+    // 不这样做时，第二行会被当成声明行（既不是字段也不是函数）而丢弃，
+    // 紧随其后的真实声明就失去了特性，信号会从图上**静默消失**。
+    let pendingAttr: string | null = null;
     for (let index = 0; index < lines.length; index++) {
       const raw = lines[index] as string;
       const lineno = index + 1;
       const s = raw.trim();
 
+      if (pendingAttr !== null) {
+        pendingAttr = `${pendingAttr} ${s}`;
+        if (bracketDelta(pendingAttr) <= 0) {
+          buf.push(pendingAttr);
+          pendingAttr = null;
+        }
+        continue;
+      }
       if (s.startsWith("[")) {
-        buf.push(raw);
+        if (bracketDelta(s) > 0) pendingAttr = s;
+        else buf.push(raw);
         continue;
       }
       if (s.startsWith("///") || s === "") {
@@ -321,12 +381,29 @@ export function parseCsProject(paths: string[], root?: string): Model {
         buf = [];
         let j = index;
         let depth = countOccurrences(raw, "{") - countOccurrences(raw, "}");
-        if (!raw.includes("{") && !s.endsWith(";")) {
+        // 主构造参数表可以跨多行（`record X(\n 参数,\n 参数);`）。旧实现直接找
+        // 「第一个含 `{` 的行」，遇到无记录体的多行声明时会一路找到**下一个类**
+        // 的开括号，把整个类当成记录体吞掉——Dsp.cs 的信号因此全部消失。
+        // 正确的终止符是字符串外的 `;`；先遇到 `{` 才是记录体。
+        if (indexOutsideString(raw, "{") < 0 && indexOutsideString(raw, ";") < 0) {
           let k = j + 1;
-          while (k < lines.length && !(lines[k] as string).includes("{")) k++;
-          if (k < lines.length) {
-            j = k;
-            depth = countOccurrences(lines[k] as string, "{") - countOccurrences(lines[k] as string, "}");
+          while (k < lines.length) {
+            const line = lines[k] as string;
+            if (indexOutsideString(line, "{") >= 0) {
+              j = k;
+              depth = countOccurrences(line, "{") - countOccurrences(line, "}");
+              break;
+            }
+            if (indexOutsideString(line, ";") >= 0) {
+              j = k;
+              depth = 0;
+              break;
+            }
+            k++;
+          }
+          if (k >= lines.length) {
+            index = j;
+            continue;
           }
         }
         if (depth > 0) {

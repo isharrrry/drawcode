@@ -14,11 +14,13 @@
  * 的 `main()`，所以没有一条测试能发现。修法是把 .gitignore 的作用域收窄到 `dotnet/`，
  * 见根目录那条规则的注释。
  *
- * `main` 是**同步**函数，返回退出码（0 成功 / 2 用法或输入错误）。
- * 这里用 `process.exitCode` 而不是 `process.exit()`：后者会**截断尚未冲刷的 stdout** ——
+ * `main` 通常同步返回退出码（0 成功 / 2 用法或输入错误），
+ * 只有 `inspect` 需要等 sidecar 子进程，返回 Promise。这里统一 await：
+ * 同步返回的 `number` 会被 `Promise.resolve` 包一层，不影响结果。
+ * 用 `process.exitCode` 而不是 `process.exit()`：后者会**截断尚未冲刷的 stdout** ——
  * 管道里重定向到文件或 `| head` 时，`updated: …` 这类输出会整段消失。
  */
 
 import { main } from "../src/cli.ts";
 
-process.exitCode = main(process.argv.slice(2));
+process.exitCode = await main(process.argv.slice(2));

@@ -20,9 +20,16 @@ class TestCsSignals(unittest.TestCase):
         cls.m = parse_cs_project(FILES, root=EX)
 
     def test_signal_set_and_dirs(self):
+        # 夹具已扩到 12 个信号（enum / struct / record / 数组样本都在）。
+        # 期望值以 TS 的 dump-ir 为准：三语言对同一份源码必须给出同一张图。
         self.assertEqual(
             sorted(self.m.signals),
-            ["Adc.cs::g_filtered", "Adc.cs::g_raw", "Dsp.cs::g_coeff"],
+            [
+                "Adc.cs::g_buffer", "Adc.cs::g_calibration", "Adc.cs::g_filtered",
+                "Adc.cs::g_raw", "Adc.cs::g_sample_count", "Adc.cs::g_state",
+                "Dsp.cs::g_coeff", "Dsp.cs::g_config", "Dsp.cs::g_frames",
+                "Dsp.cs::g_gain", "Dsp.cs::g_saturated", "Dsp.cs::g_window",
+            ],
         )
         self.assertEqual(self.m.signals["Adc.cs::g_raw"].dir, "in")
         self.assertEqual(self.m.signals["Adc.cs::g_filtered"].dir, "out")
@@ -42,7 +49,14 @@ class TestCsFuncs(unittest.TestCase):
         cls.m = parse_cs_project(FILES, root=EX)
 
     def test_func_set(self):
-        self.assertEqual(sorted(self.m.funcs), ["Adc.cs::AdcRead", "Dsp.cs::FirApply", "Dsp.cs::SetGain"])
+        self.assertEqual(
+            sorted(self.m.funcs),
+            [
+                "Adc.cs::AdcCalibrate", "Adc.cs::AdcConfigure", "Adc.cs::AdcFaultReset",
+                "Adc.cs::AdcRead", "Dsp.cs::ApplyWindow", "Dsp.cs::ConfigureWindow",
+                "Dsp.cs::FirApply", "Dsp.cs::ResetCounters", "Dsp.cs::SetGain",
+            ],
+        )
 
     def test_func_annotation_and_device(self):
         f = self.m.funcs["Adc.cs::AdcRead"]
@@ -57,24 +71,30 @@ class TestCsFuncs(unittest.TestCase):
     def test_params_are_ports(self):
         f = self.m.funcs["Dsp.cs::SetGain"]
         self.assertEqual([p.name for p in f.params], ["gain"])
-        self.assertEqual(f.params[0].ctype, "byte")
+        self.assertEqual(f.params[0].ctype, "double")
 
     def test_def_use(self):
         f = self.m.funcs["Adc.cs::AdcRead"]
-        self.assertEqual(sorted(f.reads), ["Adc.cs::g_raw"])
-        self.assertEqual(sorted(f.writes), ["Adc.cs::g_filtered"])
+        # `g_sample_count++` 与 TS 一致：只算 read（自增的写边不生成）。
+        self.assertEqual(
+            sorted(f.reads),
+            ["Adc.cs::g_buffer", "Adc.cs::g_calibration", "Adc.cs::g_raw", "Adc.cs::g_sample_count"],
+        )
+        self.assertEqual(sorted(f.writes), ["Adc.cs::g_filtered", "Adc.cs::g_state"])
         self.assertEqual(f.calls, ["Dsp.cs::FirApply"])
 
     def test_def_use_array_element(self):
-        f = self.m.funcs["Dsp.cs::SetGain"]
+        # `g_coeff[i] *= k`：数组元素写要归结到数组本身，同时它也是读。
+        f = self.m.funcs["Dsp.cs::ApplyWindow"]
         self.assertEqual(f.writes, ["Dsp.cs::g_coeff"])
-        self.assertEqual(f.reads, [])
+        self.assertEqual(sorted(f.reads), ["Dsp.cs::g_coeff", "Dsp.cs::g_window"])
 
     def test_edges(self):
         got = sorted((e.src, e.dst, e.rw) for e in self.m.edges)
         self.assertIn(("Adc.cs::g_raw", "Adc.cs::AdcRead", "read"), got)
         self.assertIn(("Adc.cs::AdcRead", "Adc.cs::g_filtered", "write"), got)
-        self.assertEqual(len(got), 6)
+        # 25 与 TS `dump-ir` 的边数一致；任何一版少一条都说明前端漂移了。
+        self.assertEqual(len(got), 25)
 
 
 class TestCsUnicodeAndRecord(unittest.TestCase):

@@ -24,7 +24,8 @@
   "scripts": {
     "test": "node --test",
     "test:conformance": "node --test test/conformance.test.ts",
-    "test:unit": "node --test test/parse.test.ts test/drawio.test.ts test/codegen.test.ts test/svg.test.ts test/xml.test.ts test/xsd.test.ts test/num.test.ts test/compressed.test.ts test/adopt.test.ts test/cli.test.ts",
+    "test:unit": "node --test test/parse.test.ts test/drawio.test.ts test/codegen.test.ts test/svg.test.ts test/xml.test.ts test/xsd.test.ts test/num.test.ts test/compressed.test.ts test/adopt.test.ts test/cli.test.ts test/artifact.test.ts test/artifact-elf.test.ts",
+    "test:artifact": "node --test test/artifact.test.ts test/artifact-elf.test.ts",
     "drawcode": "node bin/drawcode.ts",
     "fixtures": "python tools/make-fixtures.py",
     "typecheck": "tsc --noEmit"

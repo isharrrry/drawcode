@@ -167,8 +167,27 @@ prettier edges is not, because it breaks comparability. This constraint is what 
 routing requires refactoring `to_drawio` to expose edge geometry as a shared function; both
 implementations currently reproduce the simplified behaviour on purpose.
 
+## Artifact viewer: reading products, not sources
+
+`drawcode inspect` reads a compiled artifact (PE/CLI, ELF, ar) and emits a model of modules, types,
+signals, functions and read/write edges. The shape is familiar, but the source is different:
+metadata and IL/symbols instead of text. It never loads or executes the artifact, and it is
+TypeScript-only — the Python and .NET implementations do not take part in this path.
+
+The VS Code extension in `editors/vscode/` is a thin client of that command. A custom read-only
+editor shells out to `inspect`, posts the canonical JSON into a webview, and renders three views
+(overview, module cross-links, persistent ER). It adds no parser of its own, so PE metadata has
+exactly one implementation (`tools/drawcode-metadata`, built on `System.Reflection.Metadata`) and
+ELF has exactly one (`typescript/src/artifact/elf.ts`).
+
+This path deliberately stays out of the `.drawio` pipeline: no layout write-back, no `sync`, no
+golden conformance levels. An artifact has no source file to write back to, and its layout is
+computed for the viewer at runtime. The JSON contract is
+[`artifact-format.md`](artifact-format.md).
+
 ## Related
 
 - [annotations.md](annotations.md) — the annotation keys that carry direction and metadata
 - [drawio-format.md](drawio-format.md) — mapping rules, coordinates, routing, compression
+- [artifact-format.md](artifact-format.md) — the `ArtifactModel` JSON emitted by `inspect`
 - [../conformance.md](conformance.md) — how the three implementations are held together

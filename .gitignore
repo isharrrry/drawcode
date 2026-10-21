@@ -32,9 +32,40 @@ dotnet/**/obj/
 # 输出产物（一条命令可重建）
 out/
 *.drawio.png
+# 忘带 --out 时 CLI 会把图写在源码旁边；示例目录只保留源码
+examples/small/*/*.drawio
+
+# C 模板示例的编译产物：验证读取器时用 `make -B` 本地重建，不入库
+templates/c/example/*.o
+templates/c/example/*.a
+templates/c/example/*.so
+templates/c/example/*.out
+
+# C# 金标准 fixture 的编译产物：`dotnet build tests/golden/small-cs` 重建，不入库
+tests/golden/small-cs/bin/
+tests/golden/small-cs/obj/
+
+# 无元数据演示的编译产物：make / dotnet build 重建，不入库。
+# 源码与构建脚本仍然提交，产物留在工作区供手工验证视图。
+examples/plain/c/*.o
+examples/plain/c/*.a
+examples/plain/c/*.so
+examples/plain/c/*.out
+examples/plain/cs/bin/
+examples/plain/cs/obj/
+
+# 小/中号 C# 示例的编译产物：dotnet build 重建，不入库
+examples/small/cs/bin/
+examples/small/cs/obj/
+examples/medium/cs/bin/
+examples/medium/cs/obj/
 
 # 编辑器 / 系统
 .vscode/
 .idea/
 Thumbs.db
 desktop.ini
+
+# VS Code 扩展测试用的临时用户数据与日志
+.vscode-test/
+*.vsix

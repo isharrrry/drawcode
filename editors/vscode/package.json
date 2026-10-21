@@ -1,0 +1,226 @@
+{
+  "name": "drawcode-artifact-viewer",
+  "displayName": "Drawcode Artifact Viewer",
+  "description": "在 VS Code 中浏览 .dll / .so / .out / .a / .o 的模块、信号、函数与数据流",
+  "version": "0.2.0",
+  "publisher": "drawcode",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "drawcode",
+          "title": "Drawcode资源管理器",
+          "icon": "media/artifacts.svg"
+        }
+      ]
+    },
+    "views": {
+      "drawcode": [
+        {
+          "id": "drawcode.artifactTrees",
+          "name": "程序集树",
+          "contextualTitle": "Drawcode 程序集树"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "drawcode.artifactTrees",
+        "contents": "把常用的程序集整理成多棵树，随工作空间保存。\n[新建程序集树](command:drawcode.tree.create)\n也可以从资源管理器把 .dll/.so/.out 拖进来。"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "drawcode.artifact",
+        "displayName": "Drawcode 程序集视图",
+        "selector": [
+          {
+            "filenamePattern": "*.dll"
+          },
+          {
+            "filenamePattern": "*.so"
+          },
+          {
+            "filenamePattern": "*.out"
+          },
+          {
+            "filenamePattern": "*.a"
+          },
+          {
+            "filenamePattern": "*.o"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "commands": [
+      {
+        "command": "drawcode.openArtifact",
+        "title": "Drawcode: 打开程序集",
+        "category": "Drawcode"
+      },
+      {
+        "command": "drawcode.inspectArtifact",
+        "title": "Drawcode: 解析当前程序集（复制 JSON）",
+        "category": "Drawcode"
+      },
+      {
+        "command": "drawcode.refreshArtifact",
+        "title": "Drawcode: 刷新程序集视图",
+        "category": "Drawcode"
+      },
+      { "command": "drawcode.tree.create", "title": "新建程序集树", "category": "Drawcode", "icon": "$(add)" },
+      { "command": "drawcode.tree.addFolder", "title": "新建分组…", "category": "Drawcode", "icon": "$(new-folder)" },
+      { "command": "drawcode.tree.addArtifact", "title": "添加程序集…", "category": "Drawcode", "icon": "$(file-add)" },
+      { "command": "drawcode.tree.scan", "title": "从工作空间添加程序集…", "category": "Drawcode", "icon": "$(search)" },
+      { "command": "drawcode.tree.addActive", "title": "将当前程序集加入程序集树", "category": "Drawcode", "icon": "$(file-add)" },
+      { "command": "drawcode.tree.rename", "title": "重命名 / 设置别名…", "category": "Drawcode", "icon": "$(edit)" },
+      { "command": "drawcode.tree.remove", "title": "从程序集树移除", "category": "Drawcode", "icon": "$(trash)" },
+      { "command": "drawcode.tree.openArtifact", "title": "打开程序集", "category": "Drawcode", "icon": "$(go-to-file)" },
+      { "command": "drawcode.tree.revealArtifact", "title": "在文件管理器中显示", "category": "Drawcode", "icon": "$(folder-opened)" },
+      { "command": "drawcode.tree.refresh", "title": "刷新程序集树", "category": "Drawcode", "icon": "$(refresh)" },
+      {
+        "command": "drawcode.generateSourceDiagram",
+        "title": "生成 Drawio 图",
+        "category": "Drawcode"
+      },
+      {
+        "command": "drawcode.generateSourceDiagramAndOpen",
+        "title": "生成 Drawio 图并打开",
+        "category": "Drawcode"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "drawcode.tree.create",
+          "when": "view == drawcode.artifactTrees",
+          "group": "navigation@1"
+        },
+        {
+          "command": "drawcode.tree.scan",
+          "when": "view == drawcode.artifactTrees",
+          "group": "navigation@2"
+        },
+        {
+          "command": "drawcode.tree.addActive",
+          "when": "view == drawcode.artifactTrees",
+          "group": "navigation@3"
+        },
+        {
+          "command": "drawcode.tree.refresh",
+          "when": "view == drawcode.artifactTrees",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "drawcode.tree.addArtifact",
+          "when": "view == drawcode.artifactTrees && viewItem =~ /^(tree|folder)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "drawcode.tree.openArtifact",
+          "when": "view == drawcode.artifactTrees && viewItem == artifact",
+          "group": "inline@1"
+        },
+        {
+          "command": "drawcode.tree.addFolder",
+          "when": "view == drawcode.artifactTrees && viewItem =~ /^(tree|folder)$/",
+          "group": "1_add@1"
+        },
+        {
+          "command": "drawcode.tree.rename",
+          "when": "view == drawcode.artifactTrees && viewItem =~ /^(tree|folder|artifact)$/",
+          "group": "2_edit@1"
+        },
+        {
+          "command": "drawcode.tree.revealArtifact",
+          "when": "view == drawcode.artifactTrees && viewItem == artifact",
+          "group": "2_edit@2"
+        },
+        {
+          "command": "drawcode.tree.remove",
+          "when": "view == drawcode.artifactTrees && viewItem =~ /^(tree|folder|artifact)$/",
+          "group": "3_remove@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "drawcode.generateSourceDiagram",
+          "when": "explorerResourceIsFolder || resourceExtname == .cs || resourceExtname == .c || resourceExtname == .h || resourceExtname == .cpp || resourceExtname == .hpp || resourceExtname == .cc || resourceExtname == .hh",
+          "group": "drawcode@1"
+        },
+        {
+          "command": "drawcode.generateSourceDiagramAndOpen",
+          "when": "explorerResourceIsFolder || resourceExtname == .cs || resourceExtname == .c || resourceExtname == .h || resourceExtname == .cpp || resourceExtname == .hpp || resourceExtname == .cc || resourceExtname == .hh",
+          "group": "drawcode@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "drawcode.tree.addActive",
+          "when": "resourceExtname =~ /\\.(dll|so|out|a|o)$/",
+          "group": "navigation@10"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Drawcode",
+      "properties": {
+        "drawcode.maxSizeMB": {
+          "type": "number",
+          "default": 64,
+          "minimum": 1,
+          "description": "超过该大小的程序集先提示，不自动解析。"
+        },
+        "drawcode.showCompilerGenerated": {
+          "type": "boolean",
+          "default": false,
+          "description": "显示编译器生成的方法（名称以 < 开头）。"
+        },
+        "drawcode.showExcluded": {
+          "type": "boolean",
+          "default": false,
+          "description": "默认显示元数据标记 Exclude 的条目。"
+        },
+        "drawcode.inferEdges": {
+          "type": "boolean",
+          "default": false,
+          "description": "ELF 缺少显式元数据时，用符号表与重定位补出推断边。"
+        },
+        "drawcode.artifactSliceThreshold": {
+          "type": "number",
+          "default": 2000,
+          "description": "信号 + 函数超过该数量时启用模型切片（模块展开时按需下发）。0 表示总是切片，-1 表示强制整份下发。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && npm run build:core && tsc -p .",
+    "build:core": "tsc -p tsconfig.core.json",
+    "typecheck": "npm run typecheck:core && tsc -p . --noEmit",
+    "typecheck:core": "tsc -p tsconfig.core.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:e2e": "npm run build && node dist/test/runTest.js",
+    "package": "npm run build && node scripts/package-vsix.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-electron": "^3.1.0",
+    "typescript": "^5.9.3"
+  }
+}

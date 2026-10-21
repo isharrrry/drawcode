@@ -34,6 +34,12 @@ read in one sitting. See [`medium/README.md`](medium/README.md).
 > to `drawcode build` — it carries no `[Drawcode(...)]` usage of its own.
 
 
+## `plain/` — 无元数据演示，源码提交、产物忽略
+
+`plain/c/` 与 `plain/cs/` 不带 `[Drawcode]` / `[Device]`，也不链接 `DrawcodeMeta`。
+它们用来验证读取器的回退路径：只靠 ELF 符号表或普通 .NET 元数据，能读到多少就展示多少。
+构建命令与四套有/无元数据产物的预期结果见 [`plain/README.md`](plain/README.md)。
+
 ## `drawio/` — a real draw.io export, committed
 
 `rack-example.drawio` is a genuine draw.io export (Electron 16.5.1, three pages, compressed

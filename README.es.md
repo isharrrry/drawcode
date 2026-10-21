@@ -77,12 +77,14 @@ La tabla de equivalencia y los comandos de prueba por lenguaje están en [`docs/
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 drawcode sync  <drawio> <files...> [--root DIR] [--write]
+drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
 | Comando | Qué hace |
 | :--- | :--- |
 | `build` | Analiza las fuentes → construye el IR → escribe el `.drawio`. `--layout-from` reutiliza el diseño hecho a mano de un diagrama existente. `--svg` emite además una vista previa de solo lectura que comparte las mismas coordenadas. |
 | `sync` | Lee el `.drawio` → aplica diseño y atributos de anotación → reescribe la **capa de declaración** en el código fuente. Es una simulación salvo que se pase `--write`. |
+| `inspect` | Lee un artefacto compilado (`.dll` / `.so` / `.out` / `.a` / `.o`) y emite JSON canónico. Nunca carga ni ejecuta el artefacto. Solo la implementación TypeScript; no forma parte de la conformidad entre las tres implementaciones. |
 
 `--inline` pliega las señales de una escritura y una lectura en aristas directas entre dispositivos,
 `--cards` dibuja las funciones con `asset` como tarjetas de imagen, `--no-rw-labels` elimina las
@@ -123,7 +125,7 @@ ellos, la salida es idéntica byte a byte al comportamiento anterior.
 ## Desarrollo
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 144 tests
+cd python && python -m unittest discover -s tests -t .    # 145 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -139,7 +141,7 @@ misma columna.
 
 | Afirmación | Cómo se midió | Resultado |
 | :--- | :--- | :--- |
-| La implementación de Python es correcta | `python -m unittest discover -s tests -t .` | **144 tests, 0 failures, 0 skipped** |
+| La implementación de Python es correcta | `python -m unittest discover -s tests -t .` | **145 tests, 0 failures, 0 skipped** |
 | El `.drawio` comprimido se lee correctamente | Releer un fichero dorado comprimido con draw.io | **nodes=6, edges=6, attrs=6** — idéntico a la forma plana |
 | Una carga ilegible no falla en silencio | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | lanza `ValueError` |
 | El `.drawio` generado es válido según el esquema | XMLSchema de `lxml` contra `tools/xsd/mxfile.xsd` | **3/3 pasan** (C, C# y un diagrama con puntos intermedios) |

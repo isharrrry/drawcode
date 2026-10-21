@@ -25,6 +25,9 @@
 `npm install` 后供 `npm run typecheck` 与编辑器补全使用；**`npm test` 不加载它们**
 （Node ≥ 22.6 原生擦除类型，测试直接跑 `.ts`），所以离线克隆后不装依赖也能跑测试。
 
+> 唯一的例外是 `inspect` 的 PE/CLI 分支：它调用 `tools/drawcode-metadata`（.NET 8 sidecar）。
+> 那是同协议栈的独立进程，不是 npm 依赖；源码链路（`build` / `sync` / `dump-ir`）仍然零运行时依赖。
+
 | 候选依赖 | 为什么不用 |
 | :--- | :--- |
 | `@xmldom/xmldom` | drawio 文档结构简单（无命名空间、无 DTD、无混合内容）。`src/xml.ts` 手写 200 行就够，而且能精确对齐 `xml.etree.ElementTree` 的空元素拼写、属性转义、`text`/`tail` 归属 —— 引库反而要去适配它的怪癖 |
@@ -66,6 +69,7 @@ node bin/drawcode.ts build ../../tests/golden/small-c/input/adc.h \
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--inline] [--cards]
                            [--no-rw-labels] [--straight-edges] [--layout-from FILE] [--svg FILE]
 drawcode sync <FILE.drawio> <files...> [--root DIR] [--write]
+drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
 | 命令 | 行为 |
@@ -78,8 +82,14 @@ drawcode sync <FILE.drawio> <files...> [--root DIR] [--write]
 | `build --no-rw-labels` | 边上的 `read` / `write` 字去掉，只留线 |
 | `build --straight-edges` | 每条边画成**直线**，不跑避障正交布线（见下） |
 | `sync` | `.drawio` → 源码，**只回写声明层**；不带 `--write` 是 dry-run |
+| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`）→ 规范 JSON；不加载、不执行目标程序 |
 
 `sync` 永不改写函数体逻辑 —— 这是设计约束，不是未实现。
+
+`inspect` 与其他命令有一条重要区别：**它不是零运行时依赖的**。PE/CLI 的解析交给
+`tools/drawcode-metadata`（.NET 8 sidecar，`System.Reflection.Metadata`），
+开发机需要 .NET 8 运行时；发布给用户的扩展按平台打自包含包。
+它只服务产物浏览，不参与 `build`/`sync`/`dump-ir` 的三实现一致性比对。
 
 `--inline` 与 `--layout-from` 同时用时，先折叠再套排版（折叠改的是图的内容，
 少掉的节点必须由重新布局补位，不是在原位留个洞）。`--cards` 只对 C# 前端的

@@ -25,7 +25,7 @@
  */
 
 import { FUNC_RE } from "./cparse.ts";
-import { CS_FUNC_RE } from "./csparse.ts";
+import { bracketDelta, CS_FUNC_RE } from "./csparse.ts";
 import { readTextFile, splitlines, writeTextFile } from "./fsutil.ts";
 import type { Device, Func, Model, PinnedGeom, Signal } from "./model.ts";
 import { num } from "./num.ts";
@@ -510,24 +510,105 @@ function mergeCsAnnotationLine(line: string, updates: Array<[string, string]>): 
 }
 
 /**
- * 从第 `from` 行向上扫过连续的 `[...]` 属性行，返回最近一行 `[Drawcode(` 的行号，找不到返回 null。
+ * 语句关键字开头、却会被字段正则误认成「类型 + 名字」的行。
+ *
+ * `return g_raw;` 在 CS_FIELD_LINE_RE 眼里就是 `type=return, name=g_raw`。解析侧天然
+ * 不受影响（要求特性里有 Direction，方法体里没有特性），但**回写侧只按名字匹配**：
+ * 若把 `return g_raw;` 当成字段声明，就会在方法体里插一条 `[Drawcode(...)]` —— 写坏源码。
+ * 所以定位字段时显式排除这些语句关键字；`return` 是最常见的一种，其余是同类风险。
+ */
+const CS_STMT_LINE_RE = /^(?:return|throw|yield|await|goto|break|continue)\b/;
+
+/** 真正的字段声明行：既要匹配字段正则，又不能是语句行。 */
+function isCsFieldLine(line: string): boolean {
+  return CS_FIELD_LINE_RE.test(line) && !CS_STMT_LINE_RE.test(line.trim());
+}
+
+/** 一条属性的行范围（含首尾行）。跨行属性因此可以被当成一个整体来定位和合并。 */
+interface CsAttrSpan {
+  start: number;
+  end: number;
+}
+
+/**
+ * 扫出文件里每条 `[...]` 属性语句的行范围，按**结束行**索引。
+ *
+ * 为什么需要"整条语句"而不是"单行"：C# 参数一多，作者（以及 IDE 的自动换行）会把
+ * `[Drawcode(...)]` 拆成多行。解析侧 csparse 用 bracketDelta 把跨行特性拼回一行再读；
+ * 回写侧若仍按「行首是不是 `[`」向上找，遇到
+ *
+ *     [Drawcode(Direction.In, Unit = "LSB",
+ *         Note = "上电后需校准")]
+ *     public static short g_raw;
+ *
+ * 的第二行（以 `Note` 开头）就会停扫，判定"上面没有 Drawcode"，然后在字段上方**再插一条**
+ * `[Drawcode]` —— 同一字段挂两条特性，源码直接编译不过。所以这里与解析侧共用
+ * bracketDelta：配对未闭合就继续吞下一行。
+ */
+function csAttrStatements(lines: string[]): Map<number, CsAttrSpan> {
+  const byEnd = new Map<number, CsAttrSpan>();
+  let i = 0;
+  while (i < lines.length) {
+    if (!(lines[i] as string).trim().startsWith("[")) {
+      i += 1;
+      continue;
+    }
+    const start = i;
+    let acc = (lines[i] as string).trim();
+    // 引号感知：`Tooltip = "a]b"` 里的 `]` 不会被当成配平（与解析侧同一函数）。
+    while (bracketDelta(acc) > 0 && i + 1 < lines.length) {
+      i += 1;
+      acc += ` ${(lines[i] as string).trim()}`;
+    }
+    byEnd.set(i, { start, end: i });
+    i += 1;
+  }
+  return byEnd;
+}
+
+/**
+ * 从第 `from` 行向上扫过连续的属性语句，返回最近一条 `[Drawcode(` 语句的行范围。
  *
  * 为什么不能只看"上一行"：设备卡片的真实形状是
  *     [Drawcode(...)]            ← 要合并的目标
  *     [Device(Model = "…")]      ← 它的"下一行"，也就是签名的"上一行"
  *     public static Hardware dev_xxx()
  * `[Device]` 卡在中间，"签名的上一行"这个定位法直接失效：会把方法误判成"没有注解"，
- * 然后（若照旧逻辑）在上面插一行重复的 `[Drawcode]`。所以必须扫过**连续的**属性行。
+ * 然后（若照旧逻辑）在上面插一行重复的 `[Drawcode]`。所以必须扫过**连续的**属性语句。
  *
  * 停扫条件与解析侧一致：readMeta 同样只把连续无空行、无注释的 `[...]` 块当同一个注解块，
- * 两边用同一条边界才能在"解析认得出"的行上写回。多个 `[Drawcode]` 时取**最近**的一行：
+ * 两边用同一条边界才能在"解析认得出"的行上写回。多个 `[Drawcode]` 时取**最近**的一条：
  * 解析侧同类键是后写覆盖前写，即离声明最近者胜。
  */
-function findCsDrawcodeAbove(lines: string[], from: number): number | null {
-  for (let j = from - 1; j >= 0 && (lines[j] as string).trim().startsWith("["); j--) {
-    if (CS_ATTR_RE.test(lines[j] as string)) return j;
+function findCsDrawcodeSpan(
+  lines: string[],
+  from: number,
+  stmts: Map<number, CsAttrSpan>,
+): CsAttrSpan | null {
+  let j = from - 1;
+  while (j >= 0) {
+    const st = stmts.get(j);
+    if (st === undefined) return null; // 上一行不是属性语句（空行/注释/其他代码）：到此为止
+    if (CS_ATTR_RE.test(lines[st.start] as string)) return st;
+    j = st.start - 1;
   }
   return null;
+}
+
+/**
+ * 对**整条**属性语句做参数级合并：多行按 `\n` 拼起来，先交给 mergeCsAnnotationLine，
+ * 结果再按行拆回去。
+ *
+ * 为什么拼合不会打乱排版：mergeCsArgs 对未变化的实参**逐字节原样**输出，而切分点只是
+ * 顶层逗号 —— 换行与缩进本来就落在某个实参片段的前导空白里，会跟着片段一起存活。
+ * 只有值确实变化的那段会被重写成 `Key = "新值"`，其前导空白（含换行）同样保留。
+ * 返回 null 表示这行一个字都没变，调用方据此保持"没改动就不写文件"。
+ */
+function mergeCsAnnotationBlock(block: string[], updates: Array<[string, string]>): string[] | null {
+  const joined = block.join("\n");
+  const merged = mergeCsAnnotationLine(joined, updates);
+  if (merged === joined) return null;
+  return merged.split("\n");
 }
 
 /**
@@ -547,27 +628,29 @@ export function syncCsSource(path: string, model: Model, rel: string): boolean {
   }
 
   interface Span {
-    /** `[Drawcode(` 所在行；null = 声明上方没有 Drawcode 注解行，需要新插一行。 */
-    dcIdx: number | null;
+    /** `[Drawcode(` 语句的行范围；null = 声明上方没有 Drawcode 注解，需要新插一行。 */
+    dc: CsAttrSpan | null;
     /** 字段声明行。 */
     fieldIdx: number;
     name: string;
   }
+  const stmts = csAttrStatements(lines);
   const spans: Span[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = matchAt(CS_FIELD_LINE_RE, lines[i] as string);
+    const m = isCsFieldLine(lines[i] as string) ? matchAt(CS_FIELD_LINE_RE, lines[i] as string) : null;
     const name = m?.groups?.name;
     if (m === null || name === undefined || !wanted.has(name)) continue;
-    spans.push({ dcIdx: findCsDrawcodeAbove(lines, i), fieldIdx: i, name });
+    spans.push({ dc: findCsDrawcodeSpan(lines, i, stmts), fieldIdx: i, name });
   }
 
   const newLines = [...lines];
   for (const span of [...spans].reverse()) {
     const sig = wanted.get(span.name) as Signal;
     const pinned = model.pinned.get(sig.id);
-    if (span.dcIdx !== null) {
-      const merged = mergeCsAnnotationLine(newLines[span.dcIdx] as string, csSignalArgs(sig, pinned));
-      if (merged !== newLines[span.dcIdx]) newLines[span.dcIdx] = merged;
+    if (span.dc !== null) {
+      const block = newLines.slice(span.dc.start, span.dc.end + 1);
+      const merged = mergeCsAnnotationBlock(block, csSignalArgs(sig, pinned));
+      if (merged !== null) newLines.splice(span.dc.start, block.length, ...merged);
       continue;
     }
     // 字段上方没有 Drawcode 注解行：插一行新的，字段行本身一格不动
@@ -582,7 +665,7 @@ export function syncCsSource(path: string, model: Model, rel: string): boolean {
   if (extra.length > 0) {
     let anchor: number | null = null;
     for (let i = 0; i < newLines.length; i++) {
-      if (CS_FIELD_LINE_RE.test(newLines[i] as string)) anchor = i + 1;
+      if (isCsFieldLine(newLines[i] as string)) anchor = i + 1;
     }
     if (anchor === null) {
       for (let i = newLines.length - 1; i >= 0; i--) {
@@ -595,7 +678,7 @@ export function syncCsSource(path: string, model: Model, rel: string): boolean {
     if (anchor === null) anchor = newLines.length;
     let indent = "        ";
     for (const line of newLines) {
-      if (CS_FIELD_LINE_RE.test(line)) {
+      if (isCsFieldLine(line)) {
         indent = line.slice(0, line.length - line.replace(/^\s+/, "").length);
         break;
       }
@@ -644,18 +727,20 @@ export function syncCsMethods(path: string, model: Model, rel: string): boolean 
   const text = readTextFile(path);
   const lines = splitlines(text);
   const newLines = [...lines];
+  const stmts = csAttrStatements(lines);
   for (let i = 0; i < lines.length; i++) {
     const m = matchAt(CS_FUNC_RE, (lines[i] as string).trim());
     const name = m?.groups?.name;
     if (m === null || name === undefined) continue;
     const f = funcs.get(name);
     if (f === undefined) continue;
-    const dcIdx = findCsDrawcodeAbove(lines, i);
-    if (dcIdx === null) continue;
+    const dc = findCsDrawcodeSpan(lines, i, stmts);
+    if (dc === null) continue;
     const updates = geomKv("Xy", "Size", model.pinned.get(f.id));
     if (updates.length === 0) continue;
-    const merged = mergeCsAnnotationLine(newLines[dcIdx] as string, updates);
-    if (merged !== newLines[dcIdx]) newLines[dcIdx] = merged;
+    const block = newLines.slice(dc.start, dc.end + 1);
+    const merged = mergeCsAnnotationBlock(block, updates);
+    if (merged !== null) newLines.splice(dc.start, block.length, ...merged);
   }
 
   if (newLines.length === lines.length && newLines.every((l, i) => l === lines[i])) return false;

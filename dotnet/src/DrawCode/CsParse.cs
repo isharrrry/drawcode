@@ -361,6 +361,48 @@ internal static class CsParse
         return bodies;
     }
 
+    /// <summary>
+    /// 方括号配平差值（引号内的 <c>[</c>/<c>]</c> 不计，<c>\\"</c> 跳过）。
+    ///
+    /// 与 TS 的 <c>bracketDelta</c>、Python 的 <c>_bracket_delta</c> 必须给出同一结果：
+    /// 解析靠它判断「这一行是不是一条跨行特性的开头」。三条实现各写一份，
+    /// 任何一份漏掉引号感知，就会在 <c>Tooltip = "a]b"</c> 上提前收尾。
+    /// </summary>
+    internal static int BracketDelta(string text)
+    {
+        var depth = 0;
+        var inString = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (inString)
+            {
+                if (ch == '\\')
+                {
+                    i++;
+                }
+                else if (ch == '"')
+                {
+                    inString = false;
+                }
+            }
+            else if (ch == '"')
+            {
+                inString = true;
+            }
+            else if (ch == '[')
+            {
+                depth++;
+            }
+            else if (ch == ']')
+            {
+                depth--;
+            }
+        }
+
+        return depth;
+    }
+
     public static Model ParseCsProject(IReadOnlyList<string> paths, string? root = null)
     {
         root ??= Path.GetDirectoryName(Path.GetFullPath(paths[0])) ?? ".";
@@ -384,9 +426,28 @@ internal static class CsParse
                 var lineno = idx + 1;
                 var raw = lines[idx];
                 var s = raw.Trim();
-                if (s.StartsWith("///", StringComparison.Ordinal) || s.StartsWith('['))
+                if (s.StartsWith("///", StringComparison.Ordinal))
                 {
                     buf.Add(raw);
+                    continue;
+                }
+
+                if (s.StartsWith('['))
+                {
+                    // 跨行特性：括号未配平就把后续行拼成一条（与 TS 的 pendingAttr、
+                    // Python 的同名分支同构）。参数一多，IDE 与作者都会换行：
+                    //     [Drawcode(Direction.In, Unit = "LSB",
+                    //         Note = "上电后需校准")]
+                    // 只收「行首是 `[`」的那一行，第二行会被当声明行，特性认不出
+                    // ⇒ 信号静默消失（C# 侧没有方向就不算信号）。
+                    var attr = s;
+                    while (BracketDelta(attr) > 0 && idx + 1 < lines.Length)
+                    {
+                        idx++;
+                        attr += " " + lines[idx].Trim();
+                    }
+
+                    buf.Add(attr);
                     continue;
                 }
 
@@ -403,33 +464,69 @@ internal static class CsParse
                 }
 
                 // 数据类型文件里的记录声明不是组件：连同记录体里的方法一起跳过。
-                // 一行到底（`...);` 或 `... { }`）直接跳过；带多行记录体的按花括号配平。
                 //
-                // depth 的起点取自**记录声明这一行**：`record 数据帧(帧头 头)` 本身
-                // 没有花括号，于是先向后找到第一个含 `{` 的行（记录体的开括号），再从
-                // 那里开始配平。for 循环继续时会 idx++，等价于 TS/Python 的 index=j+1。
+                // 先确定记录声明在**哪一行结束**，再决定有没有记录体。不能一上来就找
+                // `{`：主构造参数表会跨行，
+                //     public sealed record DspConfig(
+                //         [property: Drawcode(...)] float[] Coefficients,
+                //         ...);
+                // 这种「以 `);` 收尾、没有记录体」的声明后面紧邻的就是 class 的 `{`，
+                // 按「找第一个 `{` 再配平」会把整个 DspModule 当成记录体吞掉 ——
+                // 该文件所有信号与函数静默消失。
                 if (RecordDeclRe.IsMatch(s))
                 {
                     buf.Clear();
                     var j = idx;
-                    var depth = CParse.CountChar(raw, '{') - CParse.CountChar(raw, '}');
-                    if (!raw.Contains('{') && !s.EndsWith(';'))
+                    var paren = 0;
+                    var hasBody = false;
+                    var ended = false;
+                    for (; j < lines.Length && !ended && !hasBody; j++)
                     {
-                        var k = j + 1;
-                        while (k < lines.Length && !lines[k].Contains('{'))
+                        var line = lines[j];
+                        var inString = false;
+                        for (var k = 0; k < line.Length; k++)
                         {
-                            k++;
-                        }
-
-                        if (k < lines.Length)
-                        {
-                            j = k;
-                            depth = CParse.CountChar(lines[k], '{') - CParse.CountChar(lines[k], '}');
+                            var ch = line[k];
+                            if (inString)
+                            {
+                                if (ch == '\\')
+                                {
+                                    k++;
+                                }
+                                else if (ch == '"')
+                                {
+                                    inString = false;
+                                }
+                            }
+                            else if (ch == '"')
+                            {
+                                inString = true;
+                            }
+                            else if (ch == '(')
+                            {
+                                paren++;
+                            }
+                            else if (ch == ')')
+                            {
+                                paren--;
+                            }
+                            else if (paren == 0 && ch == ';')
+                            {
+                                ended = true;
+                                break;
+                            }
+                            else if (paren == 0 && ch == '{')
+                            {
+                                hasBody = true;
+                                break;
+                            }
                         }
                     }
 
-                    if (depth > 0)
+                    j--; // 回到终止行（for 的步进先加了 1）
+                    if (hasBody)
                     {
+                        var depth = CParse.CountChar(lines[j], '{') - CParse.CountChar(lines[j], '}');
                         var k = j + 1;
                         while (k < lines.Length && depth > 0)
                         {

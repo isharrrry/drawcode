@@ -22,7 +22,7 @@ in [benchmark.md](benchmark.md) compares implementations rather than ecosystems.
 | Runtime dependencies | **none** (stdlib only) | **none** (no `node_modules`) | **none** (BCL only) |
 | Entry point | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | Tests | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| Test count | 144 | 175 | 119 |
+| Test count | 145 | 210 | 120 |
 | Per-implementation guide | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 Every command in the table runs from the repository root. Each implementation directory also has a

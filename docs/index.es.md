@@ -4,8 +4,9 @@
 
 > Documentación de [drawcode](../README.es.md) — una herramienta bidireccional código ↔ diagrama de flujo de datos, donde el código fuente es la única fuente de verdad.
 
-Todos los temas siguientes existen en los tres idiomas. La versión inglesa se escribe primero y completa;
-las otras dos son traducciones fieles, no resúmenes. Las tres se actualizan en el mismo cambio.
+Todos los temas siguientes existen en los tres idiomas, salvo los marcados *(sin traducción todavía)*.
+La versión inglesa se escribe primero y completa; las otras dos son traducciones fieles, no resúmenes.
+Las tres se actualizan en el mismo cambio.
 
 ## Temas
 
@@ -16,6 +17,7 @@ las otras dos son traducciones fieles, no resúmenes. Las tres se actualizan en 
 | **Formato `.drawio`** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Mapeo de elementos, semántica de coordenadas, reglas de anclas y enrutado, y la forma de almacenamiento comprimido de draw.io |
 | **Benchmark** | [English](benchmark.md) · [中文](benchmark.zh-CN.md) · [Español](benchmark.es.md) | Rendimiento medido en las tres implementaciones, con las cifras brutas y adónde va realmente el tiempo |
 | **Implementaciones** | [English](implementations.md) · [中文](implementations.zh-CN.md) · [Español](implementations.es.md) | Cómo compilar, probar e invocar cada una de las versiones Python, TypeScript y .NET |
+| **Formato de artefactos** | [English](artifact-format.md) *(sin traducción todavía)* | El `ArtifactModel` que emite `inspect`: binarios admitidos, ids estables, diagnósticos, JSON canónico y por qué esta vía está separada del IR de código fuente |
 | **Contribuir** | [English](contributing.md) · [中文](contributing.zh-CN.md) · [Español](contributing.es.md) | Entorno, ejecutar pruebas, añadir casos dorados, añadir un lenguaje fuente y lo que está deliberadamente sin verificar |
 
 ## Por dónde empezar

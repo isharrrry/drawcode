@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    小样例的 C# 工程。默认编译项会把同目录的 Adc.cs / Dsp.cs /
+    DrawcodeAttributes.cs 一起收进来，不额外维护文件清单。
+
+    这个工程只用于「编译出程序集给读取器当样本」：源码里没有可执行入口，
+    也不需要 NuGet 依赖。构建产物由 .gitignore 忽略，但保留在工作区供手工验证。
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>small-cs</AssemblyName>
+    <RootNamespace>Drawcode</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

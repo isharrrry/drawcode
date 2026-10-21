@@ -391,10 +391,19 @@ test("edit-back: editing a .drawio on disk, then reading it back", () => {
 
 const CS_NAMES = ["Adc.cs", "Dsp.cs"];
 
-/** C# 信号注解行（夹具原样）与注入了手写 Xy/Size/Style 的版本。 */
-const CS_GRAW = '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准")]';
+/**
+ * C# 信号注解（夹具原样）与注入了手写 Xy/Size/Style 的版本。
+ *
+ * 夹具里 `g_raw` 的注解**刻意跨两行**：参数一多，IDE 与作者都会换行，回写必须能认出
+ * 并就地合并整条语句。若哪天实现退回「只看行首是不是 `[`」，这里会在字段上方多插一条
+ * `[Drawcode]`，下面的断言随即炸掉。
+ */
+const CS_GRAW =
+  '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值",\n' +
+  '            Note = "上电后需校准", Path = "adc/采样前端", Tags = "telemetry,rmem")]';
 const CS_GRAW_HAND =
-  '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]';
+  '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值",\n' +
+  '            Note = "上电后需校准", Path = "adc/采样前端", Tags = "telemetry,rmem", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]';
 
 function tempCsProject(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-ts-cs-"));
@@ -590,18 +599,27 @@ test("codegen: hand-written C# signal args survive (Style, Xy) with an empty pin
     sig.alias = "改名后的采样值";
     assert.ok(syncCsSource(path.join(dir, "Adc.cs"), m, "Adc.cs"));
     const text = readOf(dir, "Adc.cs");
-    // 位置参数 Direction.In 原位、手写 Xy/Size/Style 原样，只有 Alias 被就地替换
+    // 位置参数 Direction.In 原位、换行与手写键原样，只有 Alias 被就地替换
     assert.ok(
       text.includes(
-        '[Drawcode(Direction.In, Unit = "LSB", Alias = "改名后的采样值", Note = "上电后需校准", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]',
+        '[Drawcode(Direction.In, Unit = "LSB", Alias = "改名后的采样值",\n' +
+          '            Note = "上电后需校准", Path = "adc/采样前端", Tags = "telemetry,rmem", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]',
       ),
     );
+    // 跨行注解仍然只有一条：没被误判成「没有注解」而在字段上方多插一行。
+    // 按行定位 g_raw 声明，它正上方的两行必须恰好是合并后的整条注解。
+    const ls = text.split("\n");
+    const decl = ls.findIndex((l) => l.includes("public static short g_raw;"));
+    assert.deepEqual(ls.slice(decl - 2, decl), [
+      '        [Drawcode(Direction.In, Unit = "LSB", Alias = "改名后的采样值",',
+      '            Note = "上电后需校准", Path = "adc/采样前端", Tags = "telemetry,rmem", Xy = "360,130", Size = "160x60", Style = "strokeColor=#4d7ea8;")]',
+    ]);
     // 对照组：重建路径（旧实现）的产物里没有 Xy/Style —— 抹掉是旧行为
     const rebuilt = renderCsAnnotation(sig).join("");
     assert.ok(!rebuilt.includes("Xy"));
     assert.ok(!rebuilt.includes("Style"));
     // 没被动过的邻居（Direction.Out 位置参数）一字不动
-    assert.ok(text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出")]'));
+    assert.ok(text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出", Tags = "telemetry")]'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -618,11 +636,14 @@ test("codegen: a dragged C# signal replaces Xy/Size in place and appends when ab
     const text = readOf(dir, "Adc.cs");
     assert.ok(
       text.includes(
-        '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值", Note = "上电后需校准", Xy = "400,200", Size = "200x80", Style = "strokeColor=#4d7ea8;")]',
+        '[Drawcode(Direction.In, Unit = "LSB", Alias = "原始采样值",\n' +
+          '            Note = "上电后需校准", Path = "adc/采样前端", Tags = "telemetry,rmem", Xy = "400,200", Size = "200x80", Style = "strokeColor=#4d7ea8;")]',
       ),
     );
     // 原本没有几何的信号：Xy 追加到实参末尾，Direction.Out 位置参数仍在首位
-    assert.ok(text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出", Xy = "500,250")]'));
+    assert.ok(
+      text.includes('[Drawcode(Direction.Out, Unit = "LSB", Alias = "滤波输出", Tags = "telemetry", Xy = "500,250")]'),
+    );
 
     // 幂等：回写后重新解析（pinned 自然为空），再 sync 必须不动
     const before = readOf(dir, "Adc.cs");
@@ -672,6 +693,36 @@ test("codegen: a dragged C# method merges its Drawcode line, [Device] and signat
 
     // 幂等：重新解析后 pinned 为空，第二趟必须报"没改"
     assert.equal(syncCsMethods(file, parseCsProject([file], dir), "Devices.cs"), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codegen: 方法体里的 return g_raw; 不会被当成字段声明写回", () => {
+  // `return g_raw;` 在字段正则眼里是 `type=return, name=g_raw`。解析侧靠「必须有方向」
+  // 天然挡住，回写侧只按名字匹配 —— 没有防护时会在方法体里插一条 [Drawcode]。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-ts-csret-"));
+  try {
+    const file = path.join(dir, "Ret.cs");
+    const source = [
+      "public static class M",
+      "{",
+      '    [Drawcode(Direction.In, Alias = "原始")]',
+      "    public static short g_raw;",
+      "",
+      '    [Drawcode(Alias = "读原始")]',
+      "    public static short ReadRaw()",
+      "    {",
+      "        return g_raw;",
+      "    }",
+      "}",
+      "",
+    ].join("\n");
+    fs.writeFileSync(file, source, "utf8");
+    const m = parseCsProject([file], dir);
+    assert.ok(m.signals.has("Ret.cs::g_raw"));
+    assert.equal(syncCsSource(file, m, "Ret.cs"), false);
+    assert.equal(fs.readFileSync(file, "utf8"), source);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

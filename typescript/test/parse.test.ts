@@ -249,6 +249,51 @@ test("C: single-part xy sets x only and leaves y undefined, same as C#", () => {
   }
 });
 
+test("C#: a multi-line [Drawcode] attribute still binds to the following declaration", () => {
+  // 参数一多，特性自然会跨行。旧实现按行匹配 ATTR_RE：第一行进了 buf，
+  // 续行被当成声明行丢掉，真正的字段声明失去 dir → 信号从 IR 里静默消失。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawcode-parse-"));
+  try {
+    fs.writeFileSync(
+      path.join(dir, "Multi.cs"),
+      [
+        "namespace N {",
+        "  public static class M {",
+        "    [Drawcode(Direction.In, Unit = \"LSB\",",
+        "        Alias = \"原始采样值\",",
+        "        Note = \"说明里带 [0] 也要解析\")]",
+        "    public static short g_multi;",
+        "",
+        "    [Drawcode(Alias = \"采样\",",
+        "        Path = \"m/采样\")]",
+        "    [Device(Vendor = \"TI\",",
+        "        Model = \"ADS1115\")]",
+        "    public static short Read()",
+        "    {",
+        "      return g_multi;",
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const m = parseCsProject([path.join(dir, "Multi.cs")], dir);
+    const signal = m.signals.get("Multi.cs::g_multi");
+    if (signal === undefined) throw new Error("多行特性后面的字段必须仍是信号");
+    assert.equal(signal.dir, "in");
+    assert.equal(signal.unit, "LSB");
+    assert.equal(signal.alias, "原始采样值");
+    assert.equal(signal.note, "说明里带 [0] 也要解析");
+    const func = m.funcs.get("Multi.cs::Read");
+    if (func === undefined) throw new Error("多行特性后面的方法必须仍是函数");
+    assert.equal(func.alias, "采样");
+    assert.equal(func.path, "m/采样");
+    assert.equal(m.devices.get("Multi.cs::Read")?.model, "ADS1115");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("C: edges", () => {
   const m = parseProject(C_FILES);
   const got = m.edges.map((e) => `${e.src}|${e.dst}|${e.rw}`).sort();
@@ -266,9 +311,18 @@ test("C: edges", () => {
 test("C#: signals, directions and annotations", () => {
   const m = parseCsProject(CS_FILES);
   assert.deepStrictEqual(sortedCopy(m.signals.keys()), [
+    "Adc.cs::g_buffer",
+    "Adc.cs::g_calibration",
     "Adc.cs::g_filtered",
     "Adc.cs::g_raw",
+    "Adc.cs::g_sample_count",
+    "Adc.cs::g_state",
     "Dsp.cs::g_coeff",
+    "Dsp.cs::g_config",
+    "Dsp.cs::g_frames",
+    "Dsp.cs::g_gain",
+    "Dsp.cs::g_saturated",
+    "Dsp.cs::g_window",
   ]);
   assert.equal(m.signals.get("Adc.cs::g_raw")?.dir, "in");
   assert.equal(m.signals.get("Adc.cs::g_filtered")?.dir, "out");
@@ -287,19 +341,24 @@ test("C#: funcs, device and params", () => {
   assert.equal(f?.tooltip, "上电后需先校准");
   assert.equal(m.devices.get("Adc.cs::AdcRead")?.model, "ADS1115");
   assert.deepStrictEqual(m.funcs.get("Dsp.cs::SetGain")?.params.map((p) => p.name), ["gain"]);
-  assert.equal(m.funcs.get("Dsp.cs::SetGain")?.params[0]?.ctype, "byte");
+  assert.equal(m.funcs.get("Dsp.cs::SetGain")?.params[0]?.ctype, "double");
 });
 
 test("C#: def-use and array-element write", () => {
   const m = parseCsProject(CS_FILES);
   const read = m.funcs.get("Adc.cs::AdcRead");
-  assert.deepStrictEqual(read?.reads, ["Adc.cs::g_raw"]);
-  assert.deepStrictEqual(read?.writes, ["Adc.cs::g_filtered"]);
+  assert.deepStrictEqual(read?.reads, [
+    "Adc.cs::g_buffer",
+    "Adc.cs::g_calibration",
+    "Adc.cs::g_raw",
+    "Adc.cs::g_sample_count",
+  ]);
+  assert.deepStrictEqual(read?.writes, ["Adc.cs::g_filtered", "Adc.cs::g_state"]);
   assert.deepStrictEqual(read?.calls, ["Dsp.cs::FirApply"]);
   const gain = m.funcs.get("Dsp.cs::SetGain");
-  assert.deepStrictEqual(gain?.writes, ["Dsp.cs::g_coeff"]);
+  assert.deepStrictEqual(gain?.writes, ["Dsp.cs::g_gain"]);
   assert.deepStrictEqual(gain?.reads, []);
-  assert.equal(m.edges.length, 6);
+  assert.equal(m.edges.length, 25);
 });
 
 test("C#: Unicode names parse; record declarations stay outside the graph", () => {
@@ -429,9 +488,9 @@ test("parseAny dispatches by extension and merges", () => {
 
   // 两门语言各自的 root 不同，这里显式给根目录，让相对路径各按各的算。
   const mixed = parseAny([...C_FILES, ...CS_FILES], EXAMPLES_C);
-  assert.equal(mixed.signals.size, 6);
-  assert.equal(mixed.funcs.size, 6);
-  assert.equal(mixed.edges.length, 12);
+  assert.equal(mixed.signals.size, 15);
+  assert.equal(mixed.funcs.size, 12);
+  assert.equal(mixed.edges.length, 31);
 });
 
 test("parseAny refuses unknown extensions loudly", () => {

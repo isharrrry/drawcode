@@ -22,7 +22,7 @@ status: stable
 | 运行时依赖 | **无**（仅标准库） | **无**（没有 `node_modules`） | **无**（仅 BCL） |
 | 入口 | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | 测试 | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| 测试数量 | 144 | 175 | 119 |
+| 测试数量 | 145 | 210 | 120 |
 | 各实现指南 | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 表里的每条命令都在仓库根目录执行。每个实现目录另有一份 `README.md`，

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    无元数据 C# 演示：不链接 templates/csharp/DrawcodeAttributes.cs，
+    源码里也没有 [Drawcode]/[Device]。编译出来的普通类库只含类型、方法、
+    静态字段，读取器应退回“能读到多少就多少”的浏览模式。
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>plain-cs</AssemblyName>
+    <RootNamespace>PlainDemo</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

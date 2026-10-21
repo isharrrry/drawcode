@@ -76,12 +76,14 @@ python -m drawcode.cli sync out/flow.drawio examples/small/c/*.h examples/small/
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 drawcode sync  <drawio> <files...> [--root DIR] [--write]
+drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
 | 命令 | 作用 |
 | :--- | :--- |
 | `build` | 解析源码 → 构建 IR → 写出 `.drawio`。`--layout-from` 复用既有图的人工布局。`--svg` 额外产出一份只读预览，与 `.drawio` 共享同一套坐标。 |
 | `sync` | 读取 `.drawio` → 应用布局与注解属性 → 把**声明层**回写到源码。不加 `--write` 时是空跑。 |
+| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`），输出规范 JSON。不加载、不执行目标程序；仅 TypeScript 实现提供，不参与三实现一致性比对。 |
 
 `--inline` 把「一写一读」的信号折叠成设备直连边，`--cards` 把带 `asset` 的函数画成图片卡片，
 `--no-rw-labels` 去掉边上的 `read`/`write`，`--straight-edges` 用直线替代正交布线。三份实现
@@ -122,7 +124,7 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 ## 开发
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 144 tests
+cd python && python -m unittest discover -s tests -t .    # 145 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -139,7 +141,7 @@ Python 3.14.6，Node 24.16.0，
 
 | 主张 | 如何测量 | 结果 |
 | :--- | :--- | :--- |
-| Python 实现是正确的 | `python -m unittest discover -s tests -t .` | **144 个测试，0 失败，0 跳过** |
+| Python 实现是正确的 | `python -m unittest discover -s tests -t .` | **145 个测试，0 失败，0 跳过** |
 | 压缩态 `.drawio` 被正确读取 | 读回一个 draw.io 压缩过的金标准文件 | **nodes=6, edges=6, attrs=6** —— 与纯文本形态完全相同 |
 | 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛 `ValueError` |
 | 生成的 `.drawio` 符合 schema | 用 `lxml` XMLSchema 对着 `tools/xsd/mxfile.xsd` 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |

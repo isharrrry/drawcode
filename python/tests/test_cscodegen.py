@@ -58,6 +58,35 @@ class TestCsCodegen(unittest.TestCase):
         self.assertIn("public static short g_raw;", text)
         self.assertIn("[Drawcode(Direction.In,", text)
 
+    def test_return_signal_is_not_mistaken_for_field(self):
+        """`return g_raw;` 在字段正则眼里是 `type=return, name=g_raw`。
+
+        解析侧靠「必须有方向」天然挡住，回写侧只按名字匹配 —— 没有防护时会在方法体里
+        插一条 [Drawcode]，把源码写坏。三语言共用同一条回归。
+        """
+        source = "\n".join([
+            "public static class M",
+            "{",
+            '    [Drawcode(Direction.In, Alias = "原始")]',
+            "    public static short g_raw;",
+            "",
+            '    [Drawcode(Alias = "读原始")]',
+            "    public static short ReadRaw()",
+            "    {",
+            "        return g_raw;",
+            "    }",
+            "}",
+            "",
+        ])
+        path = os.path.join(self.dir, "Ret.cs")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(source)
+        m = parse_cs_project([path], root=self.dir)
+        self.assertIn("Ret.cs::g_raw", m.signals)
+        self.assertFalse(sync_cs_source(path, m, "Ret.cs"))
+        with open(path, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), source)
+
     def test_direction_flip_rewrites_attribute(self):
         self.model.signals["Adc.cs::g_filtered"].dir = "inout"
         sync_cs_source(self.paths[0], self.model, "Adc.cs")

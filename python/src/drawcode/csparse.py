@@ -121,6 +121,38 @@ RECORD_DECL_RE = re.compile(
 SKIP_PREFIX = ("using ", "namespace ", "#")
 
 
+def _bracket_delta(text):
+    """方括号配平差值（引号内的 `[`/`]` 不计，`\\"` 跳过）。
+
+    与 TS 的 ``bracketDelta``、.NET 的同名工具必须给出同一结果：回写与解析都靠它判断
+    「这一行是不是一条跨行特性的开头」。参数一多时 IDE 会自动换行，
+
+        [Drawcode(Direction.In, Unit = "LSB",
+            Note = "上电后需校准")]
+
+    只按「行首是不是 `[`」收集，第二行会被当成声明行，特性认不出 ⇒ 信号静默消失
+    （Python 侧更严重：没有方向就不算信号，g_raw 整个节点不见）。
+    """
+    depth = 0
+    in_string = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_string:
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        i += 1
+    return depth
+
+
 def _parse_args(body):
     """``Key = "value"`` / ``Key = bare`` → ``[(小写键, 值)]``，按出现顺序。
 
@@ -247,8 +279,19 @@ def parse_cs_project(paths, root=None):
             lineno = index + 1
             s = raw.strip()
             # 注解行：`///` 文档注释或 `[...]` 特性，先攒着
-            if s.startswith("///") or s.startswith("["):
+            if s.startswith("///"):
                 buf.append(raw)
+                index += 1
+                continue
+            if s.startswith("["):
+                # 跨行特性：括号未配平就把后续行拼成一条（与 TS 的 pendingAttr 同构）。
+                # 拼成一条而不是逐行入 buf，是因为 ATTR_RE 的 `(.*)` 不跨行，
+                # 而 _read_meta 只对**整条**特性做匹配。
+                attr = s
+                while _bracket_delta(attr) > 0 and index + 1 < len(lines):
+                    index += 1
+                    attr += " " + lines[index].strip()
+                buf.append(attr)
                 index += 1
                 continue
             if not s:
@@ -269,16 +312,49 @@ def parse_cs_project(paths, root=None):
             # 方法不会进入下面的声明识别。
             if RECORD_DECL_RE.match(s):
                 buf = []
+                # 先确定记录声明在**哪一行结束**，再决定有没有记录体。
+                # 不能一上来就找 `{`：主构造参数表会跨行，
+                #
+                #     public sealed record DspConfig(
+                #         [property: Drawcode(...)] float[] Coefficients,
+                #         ...);
+                #
+                # 这种「以 `);` 收尾、没有记录体」的声明后面紧邻的就是 class 的 `{`，
+                # 按「找第一个 `{` 再配平」会把整个 DspModule 当成记录体吞掉 ——
+                # 该文件所有信号与函数静默消失（实测 Dsp.cs 曾整份解析不出东西）。
                 j = index
-                depth = raw.count("{") - raw.count("}")
-                if "{" not in raw and not s.endswith(";"):
-                    k = j + 1
-                    while k < len(lines) and "{" not in lines[k]:
+                paren = 0
+                has_body = False
+                ended = False
+                while j < len(lines):
+                    line = lines[j]
+                    in_string = False
+                    k = 0
+                    while k < len(line):
+                        ch = line[k]
+                        if in_string:
+                            if ch == "\\":
+                                k += 1
+                            elif ch == '"':
+                                in_string = False
+                        elif ch == '"':
+                            in_string = True
+                        elif ch == "(":
+                            paren += 1
+                        elif ch == ")":
+                            paren -= 1
+                        elif paren == 0 and ch == ";":
+                            ended = True
+                            break
+                        elif paren == 0 and ch == "{":
+                            has_body = True
+                            break
                         k += 1
-                    if k < len(lines):
-                        j = k
-                        depth = lines[k].count("{") - lines[k].count("}")
-                if depth > 0:
+                    if ended or has_body:
+                        break
+                    j += 1
+                if has_body:
+                    depth = lines[j].count("{") - lines[j].count("}")
                     k = j + 1
                     while k < len(lines) and depth > 0:
                         depth += lines[k].count("{") - lines[k].count("}")

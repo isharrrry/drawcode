@@ -75,18 +75,36 @@ The equivalence table and the per-language test commands are in [`docs/implement
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
 drawcode sync  <drawio> <files...> [--root DIR] [--write]
+drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
 | Command | Does |
 | :--- | :--- |
 | `build` | Parse sources → build IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout. `--svg` also emits a read-only preview sharing the same coordinates. |
 | `sync` | Read `.drawio` → apply layout and annotation attributes → write the **declaration layer** back to source. Dry run unless `--write` is passed. |
+| `inspect` | Read a compiled artifact (`.dll` / `.so` / `.out` / `.a` / `.o`) and emit canonical JSON. Never loads or executes the artifact. TypeScript implementation only; not part of the three-implementation conformance suite. |
 
 `--inline` folds one-write/one-read signals into direct edges, `--cards` renders `asset`-bearing
 functions as image cards, `--no-rw-labels` drops the `read`/`write` edge labels, and
 `--straight-edges` replaces orthogonal routing with straight lines. All three implementations accept
 the same flags with the same semantics; without them the output is byte-identical to the old
 behaviour.
+
+## Browsing compiled artifacts
+
+`drawcode inspect` also powers a read-only VS Code viewer. Open a `.dll`, `.so`, `.out`, `.a` or
+`.o` and the custom editor shows what was compiled into it:
+
+- **Overview** — format, architecture, entity counts and reader diagnostics.
+- **Module cross-links** — a virtualized tree of modules, types, signals and functions; checking a
+  signal draws the write → signal → read flow with orthogonal routing.
+- **Persistent data** — types marked `Store` as ER tables, with field types and nested-type links.
+
+![drawcode artifact viewer](docs/assets/artifact-viewer.png)
+
+Prerequisites and settings live in [`editors/vscode/README.md`](editors/vscode/README.md). The
+extension calls the TypeScript CLI and does not reimplement PE/ELF parsing; it never loads or
+executes the artifact.
 
 ## Core concepts
 
@@ -117,13 +135,15 @@ behaviour.
 | `.drawio` mapping, routing rules, coordinate semantics | [`docs/drawio-format.md`](docs/drawio-format.md) |
 | Measured performance, three implementations | [`docs/benchmark.md`](docs/benchmark.md) |
 | How the three implementations are held to one spec | [`docs/conformance.md`](docs/conformance.md) |
+| The `ArtifactModel` JSON emitted by `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
+| Browsing a compiled artifact in VS Code | [`editors/vscode/README.md`](editors/vscode/README.md) |
 | Building, testing, adding a language | [`docs/contributing.md`](docs/contributing.md) |
 | How to implement this capability yourself | [`python/SKILL.md`](python/SKILL.md), [`typescript/SKILL.md`](typescript/SKILL.md), [`dotnet/SKILL.md`](dotnet/SKILL.md) |
 
 ## Development
 
 ```bash
-cd python && python -m unittest discover -s tests -t .    # 144 tests
+cd python && python -m unittest discover -s tests -t .    # 145 tests
 cd typescript && npm test
 cd dotnet && dotnet test
 
@@ -139,7 +159,7 @@ command in the same column.
 
 | Claim | How it was measured | Result |
 | :--- | :--- | :--- |
-| Python implementation is correct | `python -m unittest discover -s tests -t .` | **144 tests, 0 failures, 0 skipped** |
+| Python implementation is correct | `python -m unittest discover -s tests -t .` | **145 tests, 0 failures, 0 skipped** |
 | Compressed `.drawio` is read correctly | Read back a draw.io-compressed golden file | **nodes=6, edges=6, attrs=6** — identical to the plain form |
 | Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | raises `ValueError` |
 | Generated `.drawio` is schema-valid | `lxml` XMLSchema against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |

@@ -76,6 +76,16 @@ internal static class CodeGen
     private static readonly Regex CsArraySizeRe = new(@"\[\s*\d+\s*\]", RegexOptions.Compiled);
 
     /// <summary>
+    /// 语句关键字开头、却会被字段正则误认成「类型 + 名字」的行。
+    /// <c>return g_raw;</c> 在 <see cref="CsFieldLineRe"/> 眼里就是
+    /// <c>ctype=return, name=g_raw</c>。解析侧天然不受影响（要求特性里有 Direction，
+    /// 方法体里没有特性），但<b>回写侧只按名字匹配</b>：若把 <c>return g_raw;</c>
+    /// 当成字段声明，就会在方法体里插一条 <c>[Drawcode(...)]</c> —— 写坏源码。
+    /// </summary>
+    private static readonly Regex CsStmtLineRe = new(
+        @"^(?:return|throw|yield|await|goto|break|continue)\b", RegexOptions.Compiled);
+
+    /// <summary>
     /// 从图里接回来的信号可能没有类型（用户在节点上只写了个名字）。
     /// 这时落一个占位类型而不是留空 —— 留空会写出一条不是声明的 <c>g_unknown;</c>，
     /// 解析器读不回来，下一次 sync 就会把它当成新元素再追加一遍（不幂等）。
@@ -789,8 +799,47 @@ internal static class CodeGen
     }
 
     /// <summary>
-    /// 从第 <paramref name="frm"/> 行向上扫过连续的 <c>[...]</c> 属性行，返回最近一行
-    /// <c>[Drawcode(</c> 的行号，找不到返回 null。
+    /// 扫出每条 <c>[...]</c> 属性语句的行范围，按<b>结束行</b>建索引。
+    ///
+    /// 为什么要认出「整条语句」而不是「单行」：参数一多，作者与 IDE 都会换行，
+    /// <code>
+    /// [Drawcode(Direction.In, Unit = "LSB",
+    ///     Note = "上电后需校准")]
+    /// public static short g_raw;
+    /// </code>
+    /// 只按「行首是不是 <c>[</c>」向上找，第二行（以 <c>Note</c> 开头）就会让扫描停下，
+    /// 判定「上面没有 Drawcode」，随后在字段上方<b>再插一条</b> <c>[Drawcode]</c> ——
+    /// 同一字段挂两条特性，源码编译不过。配平规则与解析侧共用
+    /// <see cref="CsParse.BracketDelta"/>：两边对「什么算跨行」的判定必须一致。
+    /// </summary>
+    private static Dictionary<int, (int Start, int End)> CsAttrStatements(IReadOnlyList<string> lines)
+    {
+        var byEnd = new Dictionary<int, (int Start, int End)>();
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (!lines[i].TrimStart().StartsWith('['))
+            {
+                continue;
+            }
+
+            var start = i;
+            var acc = lines[i].Trim();
+            // 引号感知：`Tooltip = "a]b"` 里的 `]` 不参与配平（与解析侧同一函数）。
+            while (CsParse.BracketDelta(acc) > 0 && i + 1 < lines.Count)
+            {
+                i++;
+                acc += " " + lines[i].Trim();
+            }
+
+            byEnd[i] = (start, i);
+        }
+
+        return byEnd;
+    }
+
+    /// <summary>
+    /// 从第 <paramref name="frm"/> 行向上扫过连续的特性语句，返回最近一条
+    /// <c>[Drawcode(</c> 的行范围。
     ///
     /// 为什么不能只看「上一行」：设备卡片的真实形状是
     /// <code>
@@ -800,21 +849,66 @@ internal static class CodeGen
     /// </code>
     /// <c>[Device]</c> 卡在中间，「签名的上一行」这个定位法直接失效：会把方法误判成
     /// 「没有注解」，然后（若照旧逻辑）在上面插一行重复的 <c>[Drawcode]</c>。所以必须
-    /// 扫过<b>连续</b>的属性行。停扫条件与解析侧一致：两处用同一条边界才能在「解析认得出」
-    /// 的行上写回。多个 <c>[Drawcode]</c> 时取<b>最近</b>的一行：解析侧同类键是后写覆盖
+    /// 扫过<b>连续</b>的特性语句。停扫条件与解析侧一致：两处用同一条边界才能在「解析认得出」
+    /// 的行上写回。多个 <c>[Drawcode]</c> 时取<b>最近</b>的一条：解析侧同类键是后写覆盖
     /// 前写，即离声明最近者胜。
     /// </summary>
-    private static int? FindCsDrawcodeAbove(IReadOnlyList<string> lines, int frm)
+    /// <summary>
+    /// 真正的字段声明行：既要匹配字段正则，又不能是语句行。
+    /// 解析侧靠「必须有方向」天然挡住 <c>return g_raw;</c>，回写侧没有这层保护，
+    /// 所以定位字段时必须显式排除。返回 <see cref="Match"/> 或 null。
+    /// </summary>
+    private static Match? MatchCsFieldLine(string line)
     {
-        for (var j = frm - 1; j >= 0 && lines[j].TrimStart().StartsWith('['); j--)
+        if (CsStmtLineRe.IsMatch(line.Trim()))
         {
-            if (CsAttrRe.IsMatch(lines[j]))
+            return null;
+        }
+
+        var m = CsFieldLineRe.Match(line);
+        return m.Success ? m : null;
+    }
+
+    private static (int Start, int End)? FindCsDrawcodeSpan(
+        IReadOnlyList<string> lines,
+        int frm,
+        Dictionary<int, (int Start, int End)> stmts)
+    {
+        var j = frm - 1;
+        while (j >= 0)
+        {
+            if (!stmts.TryGetValue(j, out var span))
             {
-                return j;
+                return null;
             }
+
+            if (CsAttrRe.IsMatch(lines[span.Start]))
+            {
+                return span;
+            }
+
+            j = span.Start - 1;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 对<b>整条</b>特性语句做参数级合并：多行按 <c>\n</c> 拼起来交给
+    /// <see cref="MergeCsAnnotationLine"/>，结果再按行拆回。
+    ///
+    /// 拼合不会打乱排版：<see cref="MergeCsArgs"/> 对未变化的实参逐字节原样输出，
+    /// 换行与缩进本来就落在某个实参片段的前导空白里；只有值确实变化的那段被重写成
+    /// <c>Key = "新值"</c>，它的前导空白（含换行）同样保留。
+    /// 返回 null 表示一个字都没变。
+    /// </summary>
+    private static string[]? MergeCsAnnotationBlock(
+        IReadOnlyList<string> block,
+        List<(string Key, string Value)> updates)
+    {
+        var joined = string.Join("\n", block);
+        var merged = MergeCsAnnotationLine(joined, updates);
+        return merged == joined ? null : merged.Split('\n');
     }
 
     /// <summary>
@@ -838,17 +932,19 @@ internal static class CodeGen
             }
         }
 
-        // 定位每个已有字段：DcIdx = 上方最近的 [Drawcode( 行（没有则 null），FieldIdx = 字段行
-        var spans = new List<(int? DcIdx, int FieldIdx, string Name)>();
+        // 定位每个已有字段：DcSpan = 上方最近的 [Drawcode( 语句范围（没有则 null），
+        // FieldIdx = 字段行
+        var stmts = CsAttrStatements(lines);
+        var spans = new List<((int Start, int End)? DcSpan, int FieldIdx, string Name)>();
         for (var i = 0; i < lines.Length; i++)
         {
-            var m = CsFieldLineRe.Match(lines[i]);
-            if (!m.Success || !wanted.ContainsKey(m.Groups["name"].Value))
+            var m = MatchCsFieldLine(lines[i]);
+            if (m is null || !wanted.ContainsKey(m.Groups["name"].Value))
             {
                 continue;
             }
 
-            spans.Add((FindCsDrawcodeAbove(lines, i), i, m.Groups["name"].Value));
+            spans.Add((FindCsDrawcodeSpan(lines, i, stmts), i, m.Groups["name"].Value));
         }
 
         var newLines = new List<string>(lines);
@@ -858,12 +954,14 @@ internal static class CodeGen
             var span = spans[s];
             var sig = wanted[span.Name];
             var pinned = model.Pinned.GetValueOrDefault(sig.Id);
-            if (span.DcIdx is { } dcIdx)
+            if (span.DcSpan is { } dc)
             {
-                var merged = MergeCsAnnotationLine(newLines[dcIdx], CsSignalArgs(sig, pinned));
-                if (merged != newLines[dcIdx])
+                var merged = MergeCsAnnotationBlock(
+                    newLines.GetRange(dc.Start, dc.End - dc.Start + 1), CsSignalArgs(sig, pinned));
+                if (merged is not null)
                 {
-                    newLines[dcIdx] = merged;
+                    newLines.RemoveRange(dc.Start, dc.End - dc.Start + 1);
+                    newLines.InsertRange(dc.Start, merged);
                 }
 
                 continue;
@@ -888,7 +986,7 @@ internal static class CodeGen
             int? anchor = null;
             for (var i = 0; i < newLines.Count; i++)
             {
-                if (CsFieldLineRe.IsMatch(newLines[i]))
+                if (MatchCsFieldLine(newLines[i]) is not null)
                 {
                     anchor = i + 1;
                 }
@@ -911,7 +1009,7 @@ internal static class CodeGen
             var indent = "        ";
             foreach (var line in newLines)
             {
-                if (CsFieldLineRe.IsMatch(line))
+                if (MatchCsFieldLine(line) is not null)
                 {
                     indent = line[..(line.Length - line.TrimStart().Length)];
                     break;
@@ -985,6 +1083,7 @@ internal static class CodeGen
         var text = Text.ReadSource(path);
         var lines = Text.SplitLines(text);
         var newLines = new List<string>(lines);
+        var stmts = CsAttrStatements(lines);
         for (var i = 0; i < lines.Length; i++)
         {
             var m = CsParse.CsFuncRe.Match(lines[i].Trim());
@@ -993,8 +1092,8 @@ internal static class CodeGen
                 continue;
             }
 
-            var dcIdx = FindCsDrawcodeAbove(lines, i);
-            if (dcIdx is null)
+            var dc = FindCsDrawcodeSpan(lines, i, stmts);
+            if (dc is null)
             {
                 continue;
             }
@@ -1005,10 +1104,12 @@ internal static class CodeGen
                 continue;
             }
 
-            var merged = MergeCsAnnotationLine(newLines[dcIdx.Value], updates);
-            if (merged != newLines[dcIdx.Value])
+            var block = newLines.GetRange(dc.Value.Start, dc.Value.End - dc.Value.Start + 1);
+            var merged = MergeCsAnnotationBlock(block, updates);
+            if (merged is not null)
             {
-                newLines[dcIdx.Value] = merged;
+                newLines.RemoveRange(dc.Value.Start, block.Count);
+                newLines.InsertRange(dc.Value.Start, merged);
             }
         }
 

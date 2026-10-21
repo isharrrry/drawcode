@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    中等样例的 C# 工程。默认编译项会收进 Adc.cs / Filter.cs / Link.cs /
+    DrawcodeAttributes.cs，供「读产物」链路做手工验证。
+
+    与 tests/golden 下的 fixture 刻意分开：金标准要稳定，示例则允许随
+    元数据能力演进（枚举、record、Store、Initial 等新样本都加在这里）。
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>medium-cs</AssemblyName>
+    <RootNamespace>Drawcode.Medium</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

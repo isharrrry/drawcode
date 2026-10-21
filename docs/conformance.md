@@ -26,6 +26,21 @@ do not redesign them.
 L1 catches parser bugs. L2 catches container-assignment bugs. L3 catches layout and routing bugs.
 Reporting which level failed is required — "output differs" is not a useful bug report.
 
+## Artifact models are outside L1–L3
+
+`drawcode inspect` produces an `ArtifactModel`, not the source IR. It has no cross-implementation
+comparison because only the TypeScript implementation reads binaries; Python and .NET have no
+counterpart to compare against. Its contract is [`artifact-format.md`](artifact-format.md), and its
+stability is checked by `test/artifact.test.ts` and `test/artifact-elf.test.ts`:
+
+- the same bytes inspected twice produce byte-identical JSON;
+- a real PE sample produces the same read/write edges as parsing its C# sources;
+- ELF and ar fixtures are synthesized inside the tests, never committed as binaries.
+
+Treating these as L1–L3 goldens would imply that the other two implementations must reproduce
+them, which they cannot by design. The source pipeline and the artifact pipeline share concepts
+(signals, functions, edges), not an output contract.
+
 ## Golden cases
 
 `tests/golden/<name>/` is self-contained:

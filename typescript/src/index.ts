@@ -67,6 +67,36 @@ export { toSvg } from "./svg.ts";
 export { dumpIr } from "./dump.ts";
 export type { IrDump, IrEdge, IrDevice, IrFunc, IrParam, IrSignal } from "./dump.ts";
 
+// —— 编译产物前端（与源码 IR 平行的另一条输入链路，见 openspec/changes/add-binary-artifact-viewer）——
+export { DiagnosticBag, DIAG, makeDiagnostic } from "./artifact/diagnostics.ts";
+export { detectFormat, toArtifactFormat } from "./artifact/format.ts";
+export type { ContainerFormat } from "./artifact/format.ts";
+export { canonicalArtifactJson } from "./artifact/inspect.ts";
+export { emptyArtifactModel } from "./artifact/model.ts";
+export { readPeCli } from "./artifact/pe.ts";
+export type { PeReadOptions } from "./artifact/pe.ts";
+export { readArtifact } from "./artifact/read.ts";
+export type { ReadOptions } from "./artifact/read.ts";
+export type {
+  ArtifactEdge,
+  ArtifactFormat,
+  ArtifactFunc,
+  ArtifactInfo,
+  ArtifactKind,
+  ArtifactModel,
+  ArtifactModule,
+  ArtifactParam,
+  ArtifactSignal,
+  ArtifactType,
+  Diagnostic,
+  DiagnosticCode,
+  DiagnosticSeverity,
+  ModuleKind,
+  SignalDirection,
+  TypeField,
+  TypeKind,
+} from "./artifact/model.ts";
+
 export { parseXml, serializeXml, iterElements, findChild, findChildren, attr, decodeEntities } from "./xml.ts";
 export type { XmlElement } from "./xml.ts";
 

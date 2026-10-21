@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    把这份 C# 金标准 fixture 编成程序集，供 `drawcode inspect` 一类「读产物」的路径做样本：
+    input/Adc.cs、input/Dsp.cs 原样参与编译，源码本身不改 —— 金标准是按这两份源码生成的。
+
+    默认的编译项 glob 会自动收进 input/ 下的两个 .cs；这里只补两处编译器需要、但源码里
+    没有的东西（见下面两个 ItemGroup）。
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>small-cs</AssemblyName>
+    <RootNamespace>Drawcode</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      特性声明不在 fixture 里（金标准的 input/ 只放被解析的源码）。直接链接仓库模板，
+      不复制：模板是唯一事实来源，复制一份迟早会漂移。
+    -->
+    <Compile Include="../../../templates/csharp/DrawcodeAttributes.cs" Link="DrawcodeAttributes.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Dsp.cs 里 FirApply 直接写 g_raw / g_filtered，没有加 AdcModule. 限定 —— 这是 fixture
+      的刻意写法：drawcode 的源码解析器按「全局唯一同名信号」把它绑到 Adc.cs 的静态字段，
+      expected.ir.json 也就这么记。C# 编译器不做这种跨类猜测，会报 CS0103。
+
+      用 global using static 补上这条名字解析：它只影响编译期查找，不修改源码、不改变
+      fixture 的语义，也不出现在产物的元数据里（using 不落 IL）。
+    -->
+    <Using Include="Drawcode.AdcModule" Static="true" />
+  </ItemGroup>
+
+</Project>

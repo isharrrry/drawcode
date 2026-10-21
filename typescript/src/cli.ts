@@ -10,9 +10,12 @@
  *   - 退出码约定与另外两版一致：参数错 2，正常 0。
  */
 
+import * as nodePath from "node:path";
 import { parseArgs } from "node:util";
 
 import { adoptForeign } from "./adopt.ts";
+import { canonicalArtifactJson } from "./artifact/inspect.ts";
+import { readArtifact } from "./artifact/read.ts";
 import { syncSource } from "./codegen.ts";
 import { applyLayout, readLayout, toDrawio } from "./drawio.ts";
 import { dumpIrJson } from "./dump.ts";
@@ -59,6 +62,11 @@ const USAGE = `usage: drawcode <build|sync> ...
   dump-ir <files...> [--root DIR] [--out FILE]
         parsed IR as canonical JSON, for L1 conformance comparison
         (write to stdout when --out is omitted; same shape as tools/dump_ir.py)
+
+  inspect <artifact> [--out FILE] [--infer-edges]
+        compiled artifact (.dll/.so/.out/.a/.o) as canonical JSON
+        (write to stdout when --out is omitted; exit 0 even when the file
+        carries no drawcode metadata -- diagnostics are part of the model)
 
 Source code is the single source of truth; the diagram is a derived view.`;
 
@@ -182,10 +190,86 @@ function parse(argv: string[]): {
     });
     return { cmd, values: values as Record<string, unknown>, positionals };
   }
+  if (cmd === "inspect") {
+    const { values, positionals } = parseArgs({
+      args: rest,
+      options: {
+        out: { type: "string" },
+        "infer-edges": { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    return { cmd, values: values as Record<string, unknown>, positionals };
+  }
   return null;
 }
 
-export function main(argv: string[]): number {
+/**
+ * CLI 壳负责解析 sidecar 的位置。
+ *
+ * 核心不再自己从 `import.meta.url` 猜仓库层级。CLI 无论从源码
+ * (`typescript/src/cli.ts`) 还是编译产物 (`typescript/dist/cli.js`) 运行，
+ * 向上两级都是仓库根，因此这里用相对自身的固定层级；扩展则有它自己的
+ * 随包目录，两边把结果以 `metadataToolPath` 传给 `readArtifact`，核心只负责调用。
+ */
+function metadataToolPath(): string {
+  return nodePath.join(
+    import.meta.dirname,
+    "..",
+    "..",
+    "tools",
+    "drawcode-metadata",
+    "bin",
+    "Release",
+    "net8.0",
+    "drawcode-metadata.dll",
+  );
+}
+
+/**
+ * `inspect` 是唯一需要异步的 CLI 命令：PE 解析要等 sidecar 子进程。
+ *
+ * 其余命令保持同步（测试直接 `assert.equal(main([...]), 0)`），
+ * 因而这里单独返回 Promise；`main` 的签名是 `number | Promise<number>`，
+ * 调用方（bin 与测试）按需 await。
+ */
+async function inspectCommand(
+  artifact: string,
+  outOption: string | undefined,
+  inferEdges: boolean,
+): Promise<number> {
+  let model;
+  try {
+    model = await readArtifact(artifact, {
+      inferEdges,
+      // 只有 PE 会用到 sidecar；ELF / ar 忽略这个字段。
+      metadataToolPath: metadataToolPath(),
+    });
+  } catch (exc) {
+    // 只有 I/O 失败（不存在、无权限）会走到这里；格式问题在模型诊断里。
+    console.error(`drawcode: inspect: ${(exc as Error).message}`);
+    return 2;
+  }
+
+  const json = canonicalArtifactJson(model);
+
+  if (outOption === undefined) {
+    // 与 dump-ir 一致：没有 --out 时只输出 JSON 本体，方便 `| jq` 或重定向。
+    process.stdout.write(json);
+    return 0;
+  }
+
+  const out = abspath(outOption);
+  ensureDir(dirname(out));
+  writeTextFile(out, json);
+  console.log(
+    `signals=${model.signals.length} funcs=${model.funcs.length} types=${model.types.length} ` +
+      `diagnostics=${model.diagnostics.length} -> ${out}`,
+  );
+  return 0;
+}
+
+export function main(argv: string[]): number | Promise<number> {
   if (argv.length === 0 || argv[0] === "-h" || argv[0] === "--help") {
     console.log(USAGE);
     return argv.length === 0 ? 2 : 0;
@@ -297,6 +381,23 @@ export function main(argv: string[]): number {
     return 0;
   }
 
+  if (cmd === "inspect") {
+    const [artifact, ...extra] = positionals;
+    if (artifact === undefined) {
+      console.error("drawcode: inspect 需要一个程序集文件");
+      return 2;
+    }
+    if (extra.length > 0) {
+      console.error(`drawcode: inspect 只接受一个产物文件，多出了：${extra.join(", ")}`);
+      return 2;
+    }
+    return inspectCommand(
+      artifact,
+      typeof values.out === "string" ? values.out : undefined,
+      values["infer-edges"] === true,
+    );
+  }
+
   if (cmd === "dump-ir") {
     const files = positionals;
     if (files.length === 0) {
@@ -366,5 +467,6 @@ export function main(argv: string[]): number {
 }
 
 if (import.meta.filename === process.argv[1]) {
-  process.exitCode = main(process.argv.slice(2));
+  // `inspect` 返回 Promise（等 sidecar），其余命令同步返回数字；统一 await。
+  process.exitCode = await main(process.argv.slice(2));
 }

@@ -22,7 +22,7 @@ rendimiento de [benchmark.md](benchmark.es.md) compara implementaciones y no eco
 | Dependencias en tiempo de ejecución | **ninguna** (solo biblioteca estándar) | **ninguna** (sin `node_modules`) | **ninguna** (solo BCL) |
 | Punto de entrada | `python -m drawcode.cli` | `node typescript/bin/drawcode.ts` | `dotnet dotnet/src/DrawCode/bin/Release/net10.0/DrawCode.dll` |
 | Pruebas | `python -m unittest discover -s tests -t .` | `node --test` | `dotnet test dotnet/DrawCode.slnx -c Release` |
-| Número de pruebas | 144 | 175 | 119 |
+| Número de pruebas | 145 | 210 | 120 |
 | Guía por implementación | [`python/SKILL.md`](../python/SKILL.md) | [`typescript/SKILL.md`](../typescript/SKILL.md) | [`dotnet/SKILL.md`](../dotnet/SKILL.md) |
 
 Todos los comandos de la tabla se ejecutan desde la raíz del repositorio. Cada directorio de

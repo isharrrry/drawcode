@@ -140,6 +140,55 @@ public class CsParseTests
     }
 
     /// <summary>
+    /// 回归：跨行 <c>[Drawcode(...)]</c> 必须被当成**一整条**特性来解析与回写。
+    ///
+    /// 三处曾同时踩坑（TS/Python/.NET 各修一次）：只收「行首是 <c>[</c>」的行，
+    /// 第二行以 <c>Note</c> 开头就被当成声明行 —— 解析侧信号消失（C# 没方向就不算信号），
+    /// 回写侧判定「没有注解」后在字段上方再插一条，同一字段两条特性，源码编译不过。
+    /// 记录声明的 <c>);</c> 也可能落在后续行，不能一上来就找 <c>{</c>，否则会把后面的
+    /// class 整段当成记录体吞掉。
+    /// </summary>
+    [Fact]
+    public void WrappedAttributeIsParsedAndSyncedInPlace()
+    {
+        var source = string.Join(
+            "\n",
+            "public sealed record 配置([property: Drawcode(Unit = \"x\")] double 增益);",
+            "",
+            "public static class 模块",
+            "{",
+            "    [Drawcode(Direction.In, Unit = \"LSB\",",
+            "        Note = \"上电后需校准\")]",
+            "    public static short g_raw;",
+            "",
+            "    [Drawcode(Alias = \"采样\")]",
+            "    public static short 采样()",
+            "    {",
+            "        return g_raw;",
+            "    }",
+            "}",
+            "");
+        var dir = Path.Combine(Fixture.ScratchRoot, Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "Wrapped.cs");
+        File.WriteAllText(path, source);
+        try
+        {
+            var m = ParseDispatch.ParseAny([path], dir);
+            Assert.True(m.Signals.ContainsKey("Wrapped.cs::g_raw"), "跨行特性里的信号必须被解析出来");
+            Assert.Equal("上电后需校准", m.Signals["Wrapped.cs::g_raw"].Note);
+            Assert.True(m.Funcs.ContainsKey("Wrapped.cs::采样"), "record 声明不得吞掉后面的 class");
+
+            Assert.False(CodeGen.SyncSource(path, m, "Wrapped.cs"), "没人拖动时回写必须一字不动");
+            Assert.Equal(source, File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// <c>Path</c> 是共享特性：三语言都必须读它，否则同一份源码只有 Python 有嵌套容器。
     /// </summary>
     [Fact]
