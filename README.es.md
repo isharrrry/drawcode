@@ -118,24 +118,76 @@ inventar hashes, detección de deriva y fusiones a tres bandas para reconciliarl
 
 ## Inicio rápido
 
+Elige el camino según lo que ya tengas. Los tres son independientes.
+
+| Qué tienes | Qué quieres | Camino |
+| :--- | :--- | :--- |
+| **Código fuente** C / C# | el diagrama de interconexión | Camino A |
+| Un **artefacto** compilado | explorar módulos, señales y datos persistentes | Camino B |
+| Un **artefacto** compilado | JSON estructurado en vez de una imagen | Camino C |
+| Un proyecto aún sin anotaciones | hacer legible su artefacto | haz primero las [plantillas de metadatos](docs/templates.md) y luego el Camino B |
+
+### Camino A: fuente → drawio
+
+**Lo más rápido: clic derecho en la extensión.** Con la extensión del Camino B instalada, haz clic
+derecho en un fichero o carpeta del explorador y elige «Generar diagrama Drawio»; el `.drawio`
+aparece en el sitio.
+
+**O usa la CLI** (Node 22.6+, sin dependencias de ejecución de terceros):
+
 ```bash
 git clone <this-repo> && cd drawcode
 
-# Sin instalación: Node >= 22.6 ejecuta el punto de entrada .ts directamente
+# Analiza los cuatro ficheros de examples/small/c y emite el diagrama más una vista previa
 node typescript/bin/drawcode.ts build \
     examples/small/c/adc.h examples/small/c/adc.c \
     examples/small/c/dsp.h examples/small/c/dsp.c \
     --root examples/small/c \
     --out out/flow.drawio --svg out/flow.svg
+```
 
-# Abre el .drawio en draw.io, reordena los nodos, guarda, y luego reutiliza ese diseño
-# y escribe las anotaciones de vuelta en tu código:
+Abre `out/flow.drawio` en draw.io para editarlo.
+
+**Ida y vuelta del diseño** (opcional): reordena en draw.io, guarda y reutiliza esa disposición con
+`--layout-from`, o escribe las anotaciones de vuelta en el código fuente:
+
+```bash
 node typescript/bin/drawcode.ts build ... --layout-from out/flow.drawio --out out/flow.drawio
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c                    # simulación: informa qué cambiaría
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c --write            # escribe de verdad
 ```
+
+### Camino B: explorar un artefacto en VS Code
+
+La extensión se instala actualmente **desde un VSIX construido en el repositorio**; todavía no está
+publicada en el marketplace.
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # genera out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+Luego ejecuta «Extensiones: Instalar desde VSIX…» en VS Code y elige ese fichero. Haz doble clic en
+cualquier `.dll` / `.so` / `.out` / `.a` / `.o`, o ejecuta el comando `Drawcode: 打开程序集`.
+
+Para modificarla: `npm install && npm run build` y luego pulsa `F5` para lanzar el Extension
+Development Host.
+
+Requisitos: VS Code >= 1.90; los `.dll` necesitan el runtime .NET 10 (el sidecar viaja dentro del
+VSIX), los ELF y los `ar` no. Detalles en [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+
+### Camino C: leer los datos estructurados del artefacto
+
+Para obtener JSON en vez de una imagen, usa `inspect` (el artefacto nunca se carga ni se ejecuta):
+
+```bash
+node typescript/bin/drawcode.ts inspect path/to/Your.dll --out model.json
+```
+
+Referencia de campos: [`docs/artifact-format.md`](docs/artifact-format.md).
 
 Los comandos de compilación, el mapa del repositorio y los comandos de prueba están en
 [`docs/implementations.md`](docs/implementations.md).

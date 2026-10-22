@@ -95,24 +95,73 @@ C# 是特性类，属性名或类型写错**编译期就报错**；C 是字符�
 
 ## 快速开始
 
+按你手上有什么选一条路，三条互不依赖。
+
+| 你手上有什么 | 想做什么 | 走哪条 |
+| :--- | :--- | :--- |
+| C / C# **源码** | 看模块之间的交联图 | 路径 A |
+| 已编译的**程序集** | 浏览模块、信号、持久化数据 | 路径 B |
+| 已编译的**程序集** | 拿结构化的 JSON 数据 | 路径 C |
+| 一个还没加注解的工程 | 让它的产物变得可读 | 先做[元数据模板](docs/templates.md)，再走路径 B |
+
+### 路径 A：源码 → drawio 图
+
+**最快：插件右键。** 装好路径 B 的扩展后，在资源管理器里右键一个源文件或目录，
+选「生成 Drawio 图」，就地生成 `.drawio`。
+
+**或者用 CLI**（需要 Node 22.6+，无第三方依赖）：
+
 ```bash
 git clone <this-repo> && cd drawcode
 
-# 无需安装：Node >= 22.6 直接运行 .ts 入口
+# 解析 examples/small/c 下四个文件，输出图与预览
 node typescript/bin/drawcode.ts build \
     examples/small/c/adc.h examples/small/c/adc.c \
     examples/small/c/dsp.h examples/small/c/dsp.c \
     --root examples/small/c \
     --out out/flow.drawio --svg out/flow.svg
+```
 
-# 在 draw.io 里打开这张 .drawio，拖动节点排好版，保存，然后复用这份布局
-# 并把注解回写进源码：
+生成后用 draw.io 打开 `out/flow.drawio` 就能编辑。
+
+**布局往返**（可选）：在 draw.io 里拖好位置保存，再用 `--layout-from` 复用这份排版，
+或把注解回写进源码：
+
+```bash
 node typescript/bin/drawcode.ts build ... --layout-from out/flow.drawio --out out/flow.drawio
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c                    # 空跑：只报告会改什么
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c --write            # 真正写入
 ```
+
+### 路径 B：在 VS Code 里浏览程序集
+
+扩展目前**从仓库打包安装**，尚未发布到扩展市场。
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+然后在 VS Code 里执行「扩展: 从 VSIX 安装…」，选中那个文件。装好后双击任一
+`.dll` / `.so` / `.out` / `.a` / `.o`，或执行命令 `Drawcode: 打开程序集`。
+
+想改代码调试：`npm install && npm run build`，然后按 `F5` 启动 Extension Development Host。
+
+前提：VS Code >= 1.90；`.dll` 需要 .NET 10 运行时（sidecar 随 VSIX 打包），ELF 与 `ar` 不需要。
+详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)。
+
+### 路径 C：读程序集的结构化数据
+
+要拿 JSON 而不是看图，用 `inspect`（产物不会被加载或执行）：
+
+```bash
+node typescript/bin/drawcode.ts inspect path/to/Your.dll --out model.json
+```
+
+字段含义见 [`docs/artifact-format.md`](docs/artifact-format.md)。
 
 构建命令、仓库地图与测试命令见
 [`docs/implementations.md`](docs/implementations.md)。

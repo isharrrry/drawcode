@@ -115,24 +115,76 @@ hashes, drift detection and three-way merges to reconcile them.
 
 ## Quick start
 
+Pick the path that matches what you already have. The three are independent.
+
+| What you have | What you want | Path |
+| :--- | :--- | :--- |
+| C / C# **source** | the cross-link diagram | Path A |
+| A compiled **artifact** | browse modules, signals, persistent data | Path B |
+| A compiled **artifact** | structured JSON instead of a picture | Path C |
+| A project with no annotations yet | make its artifact readable | do [metadata templates](docs/templates.md) first, then Path B |
+
+### Path A: source → drawio
+
+**Fastest — right-click in the extension.** Once the Path B extension is installed, right-click a
+source file or folder in the explorer and pick "Generate Drawio diagram"; the `.drawio` appears
+in place.
+
+**Or use the CLI** (Node 22.6+, no third-party runtime dependencies):
+
 ```bash
 git clone <this-repo> && cd drawcode
 
-# No install: Node >= 22.6 runs the .ts entry point directly
+# Parse the four files under examples/small/c, emit the diagram plus a preview
 node typescript/bin/drawcode.ts build \
     examples/small/c/adc.h examples/small/c/adc.c \
     examples/small/c/dsp.h examples/small/c/dsp.c \
     --root examples/small/c \
     --out out/flow.drawio --svg out/flow.svg
+```
 
-# Open a .drawio in draw.io, rearrange the nodes, save, then reuse that layout
-# and write the annotations back into your source:
+Open `out/flow.drawio` in draw.io to edit it.
+
+**Layout round-trip** (optional): rearrange in draw.io, save, then reuse that arrangement with
+`--layout-from`, or write annotations back into the source:
+
+```bash
 node typescript/bin/drawcode.ts build ... --layout-from out/flow.drawio --out out/flow.drawio
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c                    # dry run: reports what would change
 node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h examples/small/c/*.c \
     --root examples/small/c --write            # actually write
 ```
+
+### Path B: browse an artifact in VS Code
+
+The extension is currently **installed from a VSIX built in the repository**; it is not published
+to the marketplace yet.
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # produces out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Double-click any
+`.dll` / `.so` / `.out` / `.a` / `.o`, or run the command `Drawcode: 打开程序集`.
+
+To hack on it: `npm install && npm run build`, then press `F5` to launch the Extension Development
+Host.
+
+Prerequisites: VS Code >= 1.90; `.dll` needs the .NET 10 runtime (the sidecar ships inside the
+VSIX), ELF and `ar` do not. Details in [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+
+### Path C: read the artifact's structured data
+
+For JSON rather than a picture, use `inspect` (the artifact is never loaded or executed):
+
+```bash
+node typescript/bin/drawcode.ts inspect path/to/Your.dll --out model.json
+```
+
+Field reference: [`docs/artifact-format.md`](docs/artifact-format.md).
 
 Build commands, the repository map and the test commands are in
 [`docs/implementations.md`](docs/implementations.md).
