@@ -32,6 +32,7 @@
 | 了解一致性测试比较什么 | [`conformance.md`](conformance.md) |
 | 看跑出来的测试与验证数字 | [`verification.md`](verification.md) |
 | 让编译产物变得可读 | [元数据模板](templates.md) |
+| 用 Agent 按思路生成孪生程序集 | [Agent 提示词](agent-prompts.md) |
 | 在 VS Code 里浏览程序集 | [VS Code 扩展](vscode-extension.md) |
 | 跑一下仓库自带的示例工程 | [示例](examples.md) |
 | 诊断一张丢了排版的图 | [`.drawio` 格式](drawio-format.zh-CN.md#压缩存储形态) |

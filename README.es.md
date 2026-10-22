@@ -118,16 +118,81 @@ inventar hashes, detección de deriva y fusiones a tres bandas para reconciliarl
 
 ## Inicio rápido
 
-Elige el camino según lo que ya tengas. Los tres son independientes.
+Elige el camino según lo que ya tengas. Los cuatro son independientes.
 
 | Qué tienes | Qué quieres | Camino |
 | :--- | :--- | :--- |
-| **Código fuente** C / C# | el diagrama de interconexión | Camino A |
+| **Una idea / una descripción de diseño** | que un agente genere un ensamblado gemelo digital legible | **Camino A** |
 | Un **artefacto** compilado | explorar módulos, señales y datos persistentes | Camino B |
-| Un **artefacto** compilado | JSON estructurado en vez de una imagen | Camino C |
-| Un proyecto aún sin anotaciones | hacer legible su artefacto | haz primero las [plantillas de metadatos](docs/templates.md) y luego el Camino B |
+| **Código fuente** C / C# | el diagrama de interconexión | Camino C |
+| Un **artefacto** compilado | JSON estructurado en vez de una imagen | Camino D |
 
-### Camino A: fuente → drawio
+La referencia completa de la línea de comandos es común a los cuatro caminos — ver
+[Uso desde la línea de comandos](#uso-desde-la-línea-de-comandos).
+
+### Camino A: crear un ensamblado gemelo con un agente
+
+El uso más típico: solo tienes una idea o una descripción de diseño, y pides a un agente que
+escriba código anotado que compile en un ensamblado cuya estructura se pueda releer.
+
+```text
+Lee templates/csharp/DrawcodeAttributes.cs y docs/annotations.md.
+
+Abajo está el sistema que quiero modelar. Genera un código C# que, una vez compilado,
+permita a drawcode leer la interconexión de módulos, las lecturas/escrituras de señales
+y los datos persistentes:
+
+<pega aquí tu descripción de diseño>
+
+Requisitos:
+- Un public static class por módulo, marcado [Drawcode(Root = "nombre del módulo")] como raíz
+- Los datos que pasan entre módulos se declaran como campos static y se anotan con
+  [Drawcode(Direction.X, Unit, Alias)]
+- Direction es relativo al módulo: In = se produce aquí, Out = se consume aquí.
+  Confirma cada dirección antes de escribirla.
+- Estructuras persistentes: record o class marcado [Drawcode(Store = true)]
+- Expresa la interacción entre módulos con sentencias reales de lectura/escritura en el cuerpo
+  de los métodos, nunca con comentarios — las aristas salen de analizar los cuerpos
+
+Después: dotnet build para confirmar que compila; ejecuta drawcode inspect e informa
+el número de módulos, señales, funciones y aristas; explica cualquier señal que falte.
+```
+
+Luego cierra el ciclo:
+
+```bash
+dotnet build
+node typescript/bin/drawcode.ts inspect bin/Release/net9.0/YourProject.dll --out model.json
+```
+
+**No te saltes este paso.** Si la salida del agente solo *parece* un gemelo o si *lo es* solo se
+sabe releyéndola.
+
+Juego completo de prompts (generar desde una idea, anotar código existente, añadir macros de C,
+pedir a un agente que explique un artefacto, trampas habituales):
+[`docs/agent-prompts.md`](docs/agent-prompts.md) *(中文)*.
+
+### Camino B: explorar un artefacto en VS Code
+
+La extensión se instala actualmente **desde un VSIX construido en el repositorio**; todavía no está
+publicada en el marketplace.
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # genera out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+Luego ejecuta «Extensiones: Instalar desde VSIX…» en VS Code y elige ese fichero. Haz doble clic en
+cualquier `.dll` / `.so` / `.out` / `.a` / `.o`, o ejecuta el comando `Drawcode: 打开程序集`.
+
+Para modificarla: `npm install && npm run build` y luego pulsa `F5` para lanzar el Extension
+Development Host.
+
+Requisitos: VS Code >= 1.90; los `.dll` necesitan el runtime .NET 10 (el sidecar viaja dentro del
+VSIX), los ELF y los `ar` no. Detalles en [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+
+### Camino C: fuente → drawio
 
 **Lo más rápido: clic derecho en la extensión.** Con la extensión del Camino B instalada, haz clic
 derecho en un fichero o carpeta del explorador y elige «Generar diagrama Drawio»; el `.drawio`
@@ -159,27 +224,7 @@ node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h exampl
     --root examples/small/c --write            # escribe de verdad
 ```
 
-### Camino B: explorar un artefacto en VS Code
-
-La extensión se instala actualmente **desde un VSIX construido en el repositorio**; todavía no está
-publicada en el marketplace.
-
-```bash
-cd editors/vscode
-npm install
-npm run package     # genera out/drawcode-artifact-viewer-0.2.0.vsix
-```
-
-Luego ejecuta «Extensiones: Instalar desde VSIX…» en VS Code y elige ese fichero. Haz doble clic en
-cualquier `.dll` / `.so` / `.out` / `.a` / `.o`, o ejecuta el comando `Drawcode: 打开程序集`.
-
-Para modificarla: `npm install && npm run build` y luego pulsa `F5` para lanzar el Extension
-Development Host.
-
-Requisitos: VS Code >= 1.90; los `.dll` necesitan el runtime .NET 10 (el sidecar viaja dentro del
-VSIX), los ELF y los `ar` no. Detalles en [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
-
-### Camino C: leer los datos estructurados del artefacto
+### Camino D: leer los datos estructurados del artefacto
 
 Para obtener JSON en vez de una imagen, usa `inspect` (el artefacto nunca se carga ni se ejecuta):
 
@@ -194,6 +239,10 @@ Los comandos de compilación, el mapa del repositorio y los comandos de prueba e
 
 ## Uso desde la línea de comandos
 
+No es un quinto camino, sino la referencia común de los cuatro anteriores: el Camino A usa `inspect`
+para verificar, el Camino C usa `build`/`sync`, el Camino D usa `inspect` directamente. El Camino B
+es la extensión y no pasa por la línea de comandos.
+
 ```
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
@@ -201,11 +250,11 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
-| Comando | Qué hace |
-| :--- | :--- |
-| `build` | Analiza las fuentes → construye el IR → escribe el `.drawio`. `--layout-from` reutiliza el diseño hecho a mano de un diagrama existente. `--svg` emite además una vista previa de solo lectura que comparte las mismas coordenadas. |
-| `sync` | Lee el `.drawio` → aplica diseño y atributos de anotación → reescribe la **capa de declaración** en el código fuente. Es una simulación salvo que se pase `--write`. |
-| `inspect` | Lee un artefacto compilado (`.dll` / `.so` / `.out` / `.a` / `.o`) y emite JSON canónico. Nunca carga ni ejecuta el artefacto. Los PE `.dll` los lee el sidecar .NET incluido; los ELF y archivos `ar` se leen en proceso. |
+| Comando | Qué hace | Lo usan |
+| :--- | :--- | :--- |
+| `build` | Analiza las fuentes → construye el IR → escribe el `.drawio`. `--layout-from` reutiliza el diseño hecho a mano de un diagrama existente. `--svg` emite además una vista previa de solo lectura que comparte las mismas coordenadas. | Camino C |
+| `sync` | Lee el `.drawio` → aplica diseño y atributos de anotación → reescribe la **capa de declaración** en el código fuente. Es una simulación salvo que se pase `--write`. | Camino C |
+| `inspect` | Lee un artefacto compilado (`.dll` / `.so` / `.out` / `.a` / `.o`) y emite JSON canónico. Nunca carga ni ejecuta el artefacto. Los PE `.dll` los lee el sidecar .NET incluido; los ELF y archivos `ar` se leen en proceso. | Caminos A y D |
 
 `--inline` pliega las señales de una escritura y una lectura en aristas directas entre dispositivos,
 `--cards` dibuja las funciones con `asset` como tarjetas de imagen, `--no-rw-labels` elimina las
@@ -290,6 +339,7 @@ en el lado de la implementación. El modelo dice lo que *debería* haber; el art
 | El JSON `ArtifactModel` que emite `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
 | Explorar un artefacto compilado en VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
 | Hacer legible tu propia compilación de C/C# | [`docs/templates.md`](docs/templates.md)（中文） |
+| Pedir a un agente un ensamblado gemelo a partir de una idea | [`docs/agent-prompts.md`](docs/agent-prompts.md)（中文） |
 | Ejecutar los proyectos de ejemplo incluidos | [`docs/examples.md`](docs/examples.md) |
 | Compilar, probar, añadir un lenguaje | [`docs/contributing.md`](docs/contributing.md) |
 | Escribir el adaptador para el siguiente lenguaje | [`typescript/SKILL.md`](typescript/SKILL.md) |

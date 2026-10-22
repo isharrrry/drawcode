@@ -33,6 +33,7 @@ version.
 | Know what the conformance suite compares | [`conformance.md`](conformance.md) |
 | See the measured test and verification figures | [`verification.md`](verification.md) |
 | Make a compiled artifact readable | [Templates](templates.md) *(中文)* |
+| Have an agent build a twin assembly from an idea | [Agent prompts](agent-prompts.md) *(中文)* |
 | Browse an assembly in VS Code | [VS Code extension](vscode-extension.md) *(中文)* |
 | Run the committed sample projects | [Examples](examples.md) |
 | Diagnose a diagram that lost its layout | [`.drawio` format](drawio-format.md#compressed-storage) |

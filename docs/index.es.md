@@ -29,6 +29,7 @@ a la versión inglesa.
 | Implementar tú mismo toda la capacidad | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 | Saber qué compara la suite de conformidad | [`conformance.md`](conformance.md) |
 | Ver las cifras medidas de prueba y verificación | [`verification.md`](verification.md) |
+| Pedir a un agente un ensamblado gemelo a partir de una idea | [Prompts para agentes](agent-prompts.md) *(中文)* |
 | Diagnosticar un diagrama que perdió su disposición | [Formato `.drawio`](drawio-format.es.md#almacenamiento-comprimido) |
 | Renderizar un `.drawio` a imagen sin tener draw.io instalado | [Contributing § Offline rendering](contributing.md#offline-rendering) |
 

@@ -115,16 +115,79 @@ hashes, drift detection and three-way merges to reconcile them.
 
 ## Quick start
 
-Pick the path that matches what you already have. The three are independent.
+Pick the path that matches what you already have. The four are independent.
 
 | What you have | What you want | Path |
 | :--- | :--- | :--- |
-| C / C# **source** | the cross-link diagram | Path A |
+| **An idea / design description** | have an agent generate a readable digital-twin assembly | **Path A** |
 | A compiled **artifact** | browse modules, signals, persistent data | Path B |
-| A compiled **artifact** | structured JSON instead of a picture | Path C |
-| A project with no annotations yet | make its artifact readable | do [metadata templates](docs/templates.md) first, then Path B |
+| C / C# **source** | the cross-link diagram | Path C |
+| A compiled **artifact** | structured JSON instead of a picture | Path D |
 
-### Path A: source → drawio
+The full command-line reference is shared by all four paths — see
+[Command-line usage](#command-line-usage).
+
+### Path A: build a digital-twin assembly with an agent
+
+The most typical use: you only have an idea or a design description, and you have an agent write
+annotated code that compiles into an assembly whose structure can be read back.
+
+```text
+Read templates/csharp/DrawcodeAttributes.cs and docs/annotations.md.
+
+Below is the system I want to model. Generate a C# codebase that, once compiled,
+lets drawcode read out module cross-links, signal reads/writes and persistent data:
+
+<paste your design description here>
+
+Requirements:
+- One public static class per module, marked [Drawcode(Root = "module name")] as a decomposition root
+- Data passed between modules: declare it as static fields and annotate with
+  [Drawcode(Direction.X, Unit, Alias)]
+- Direction is relative to the module: In = produced here, Out = consumed here.
+  Confirm each direction before writing it.
+- Persistent structures: record or class marked [Drawcode(Store = true)]
+- Express cross-module interaction as real read/write statements in method bodies,
+  never as comments — edges come from scanning function bodies
+
+Then: dotnet build to confirm it compiles; run drawcode inspect and report
+module, signal, function and edge counts; explain any signal that is missing.
+```
+
+Then close the loop:
+
+```bash
+dotnet build
+node typescript/bin/drawcode.ts inspect bin/Release/net9.0/YourProject.dll --out model.json
+```
+
+**Do not skip this step.** Whether the agent's output merely *looks* like a twin and whether it
+*is* one can only be told by reading it back.
+
+Full prompt set (generate from an idea, annotate existing code, add C macros, have an agent explain
+an artifact, common pitfalls): [`docs/agent-prompts.md`](docs/agent-prompts.md) *(中文)*.
+
+### Path B: browse an artifact in VS Code
+
+The extension is currently **installed from a VSIX built in the repository**; it is not published
+to the marketplace yet.
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # produces out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Double-click any
+`.dll` / `.so` / `.out` / `.a` / `.o`, or run the command `Drawcode: 打开程序集`.
+
+To hack on it: `npm install && npm run build`, then press `F5` to launch the Extension Development
+Host.
+
+Prerequisites: VS Code >= 1.90; `.dll` needs the .NET 10 runtime (the sidecar ships inside the
+VSIX), ELF and `ar` do not. Details in [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+
+### Path C: source → drawio
 
 **Fastest — right-click in the extension.** Once the Path B extension is installed, right-click a
 source file or folder in the explorer and pick "Generate Drawio diagram"; the `.drawio` appears
@@ -156,27 +219,7 @@ node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h exampl
     --root examples/small/c --write            # actually write
 ```
 
-### Path B: browse an artifact in VS Code
-
-The extension is currently **installed from a VSIX built in the repository**; it is not published
-to the marketplace yet.
-
-```bash
-cd editors/vscode
-npm install
-npm run package     # produces out/drawcode-artifact-viewer-0.2.0.vsix
-```
-
-Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Double-click any
-`.dll` / `.so` / `.out` / `.a` / `.o`, or run the command `Drawcode: 打开程序集`.
-
-To hack on it: `npm install && npm run build`, then press `F5` to launch the Extension Development
-Host.
-
-Prerequisites: VS Code >= 1.90; `.dll` needs the .NET 10 runtime (the sidecar ships inside the
-VSIX), ELF and `ar` do not. Details in [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
-
-### Path C: read the artifact's structured data
+### Path D: read the artifact's structured data
 
 For JSON rather than a picture, use `inspect` (the artifact is never loaded or executed):
 
@@ -191,6 +234,10 @@ Build commands, the repository map and the test commands are in
 
 ## Command-line usage
 
+This is not a fifth path — it is the shared reference for the four above: Path A uses `inspect` to
+verify, Path C uses `build`/`sync`, Path D uses `inspect` directly. Path B is the extension and does
+not go through the command line.
+
 ```
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
@@ -198,11 +245,11 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
-| Command | Does |
-| :--- | :--- |
-| `build` | Parse sources → build IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout. `--svg` also emits a read-only preview sharing the same coordinates. |
-| `sync` | Read `.drawio` → apply layout and annotation attributes → write the **declaration layer** back to source. Dry run unless `--write` is passed. |
-| `inspect` | Read a compiled artifact (`.dll` / `.so` / `.out` / `.a` / `.o`) and emit canonical JSON. Never loads or executes the artifact. PE `.dll` reading uses the bundled .NET sidecar; ELF and `ar` archives are read in-process. |
+| Command | Does | Used by |
+| :--- | :--- | :--- |
+| `build` | Parse sources → build IR → write `.drawio`. `--layout-from` reuses an existing diagram's hand-made layout. `--svg` also emits a read-only preview sharing the same coordinates. | Path C |
+| `sync` | Read `.drawio` → apply layout and annotation attributes → write the **declaration layer** back to source. Dry run unless `--write` is passed. | Path C |
+| `inspect` | Read a compiled artifact (`.dll` / `.so` / `.out` / `.a` / `.o`) and emit canonical JSON. Never loads or executes the artifact. PE `.dll` reading uses the bundled .NET sidecar; ELF and `ar` archives are read in-process. | Paths A, D |
 
 `--inline` folds one-write/one-read signals into direct edges, `--cards` renders `asset`-bearing
 functions as image cards, `--no-rw-labels` drops the `read`/`write` edge labels, and
@@ -287,6 +334,7 @@ the difference is the list that needs reconciling.
 | The `ArtifactModel` JSON emitted by `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
 | Browsing a compiled artifact in VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
 | Making your own C/C# build readable | [`docs/templates.md`](docs/templates.md)（中文） |
+| Have an agent build a twin assembly from an idea | [`docs/agent-prompts.md`](docs/agent-prompts.md)（中文） |
 | Running the bundled sample projects | [`docs/examples.md`](docs/examples.md) |
 | Building, testing, adding a language | [`docs/contributing.md`](docs/contributing.md) |
 | Adding the next code-language adapter | [`typescript/SKILL.md`](typescript/SKILL.md) |

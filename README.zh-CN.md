@@ -95,16 +95,72 @@ C# 是特性类，属性名或类型写错**编译期就报错**；C 是字符�
 
 ## 快速开始
 
-按你手上有什么选一条路，三条互不依赖。
+按你手上有什么选一条路，四条互不依赖。
 
 | 你手上有什么 | 想做什么 | 走哪条 |
 | :--- | :--- | :--- |
-| C / C# **源码** | 看模块之间的交联图 | 路径 A |
+| **思路 / 设计描述** | 让 Agent 生成一套可读的孪生程序集代码 | **路径 A** |
 | 已编译的**程序集** | 浏览模块、信号、持久化数据 | 路径 B |
-| 已编译的**程序集** | 拿结构化的 JSON 数据 | 路径 C |
-| 一个还没加注解的工程 | 让它的产物变得可读 | 先做[元数据模板](docs/templates.md)，再走路径 B |
+| C / C# **源码** | 看模块之间的交联图 | 路径 C |
+| 已编译的**程序集** | 拿结构化的 JSON 数据 | 路径 D |
 
-### 路径 A：源码 → drawio 图
+命令行完整参数是四条路共用的，集中在[命令行用法](#命令行用法)。
+
+### 路径 A：用 Agent 创建孪生程序集
+
+最典型的用法：手上只有思路或设计描述，让 Agent 写出一套带注解的代码，
+编译后就是一个能读出结构的孪生程序集。
+
+```text
+读 templates/csharp/DrawcodeAttributes.cs 和 docs/annotations.md。
+
+下面是我要建模的系统，请生成一套 C# 代码，让它编译后能被 drawcode 读出
+模块交联、信号读写和持久化数据：
+
+<在这里粘贴你的设计描述>
+
+要求：
+- 每个模块一个 public static class，类上用 [Drawcode(Root = "模块名")] 标成分解根
+- 模块之间传递的数据用 static 字段声明为信号，加 [Drawcode(Direction.X, Unit, Alias)]
+- Direction 是「相对本模块」的：In = 本模块产生，Out = 本模块消费，先确认方向再写
+- 需要持久化的数据结构用 record 或 class，标 [Drawcode(Store = true)]
+- 模块之间的交互写成方法体里真实的读写语句，不要用注释描述 —— 边是从函数体扫出来的
+
+生成后请：dotnet build 确认能编译；drawcode inspect 读产物并报告
+模块数、信号数、函数数、边数；有信号没出现就说明原因。
+```
+
+然后按验证闭环走一遍：
+
+```bash
+dotnet build
+node typescript/bin/drawcode.ts inspect bin/Release/net9.0/YourProject.dll --out model.json
+```
+
+**这一步不能省。** Agent 写得像不像孪生，和它是不是孪生，只有读出来才知道。
+
+完整提示词（从思路生成、给已有代码补注解、C 侧加宏、让 Agent 读产物解释系统、常见坑）见
+[`docs/agent-prompts.md`](docs/agent-prompts.md)。
+
+### 路径 B：在 VS Code 里浏览程序集
+
+扩展目前**从仓库打包安装**，尚未发布到扩展市场。
+
+```bash
+cd editors/vscode
+npm install
+npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
+```
+
+然后在 VS Code 里执行「扩展: 从 VSIX 安装…」，选中那个文件。装好后双击任一
+`.dll` / `.so` / `.out` / `.a` / `.o`，或执行命令 `Drawcode: 打开程序集`。
+
+想改代码调试：`npm install && npm run build`，然后按 `F5` 启动 Extension Development Host。
+
+前提：VS Code >= 1.90；`.dll` 需要 .NET 10 运行时（sidecar 随 VSIX 打包），ELF 与 `ar` 不需要。
+详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)。
+
+### 路径 C：源码 → drawio 图
 
 **最快：插件右键。** 装好路径 B 的扩展后，在资源管理器里右键一个源文件或目录，
 选「生成 Drawio 图」，就地生成 `.drawio`。
@@ -135,25 +191,7 @@ node typescript/bin/drawcode.ts sync out/flow.drawio examples/small/c/*.h exampl
     --root examples/small/c --write            # 真正写入
 ```
 
-### 路径 B：在 VS Code 里浏览程序集
-
-扩展目前**从仓库打包安装**，尚未发布到扩展市场。
-
-```bash
-cd editors/vscode
-npm install
-npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
-```
-
-然后在 VS Code 里执行「扩展: 从 VSIX 安装…」，选中那个文件。装好后双击任一
-`.dll` / `.so` / `.out` / `.a` / `.o`，或执行命令 `Drawcode: 打开程序集`。
-
-想改代码调试：`npm install && npm run build`，然后按 `F5` 启动 Extension Development Host。
-
-前提：VS Code >= 1.90；`.dll` 需要 .NET 10 运行时（sidecar 随 VSIX 打包），ELF 与 `ar` 不需要。
-详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)。
-
-### 路径 C：读程序集的结构化数据
+### 路径 D：读程序集的结构化数据
 
 要拿 JSON 而不是看图，用 `inspect`（产物不会被加载或执行）：
 
@@ -168,6 +206,9 @@ node typescript/bin/drawcode.ts inspect path/to/Your.dll --out model.json
 
 ## 命令行用法
 
+这不是第五条路径，而是上面四条共用的参考：路径 A 用 `inspect` 验证、路径 C 用 `build`/`sync`、
+路径 D 直接用 `inspect`。路径 B 是插件，不走命令行。
+
 ```
 drawcode build <files...> [--root DIR] [--out FILE] [--merge] [--layout-from FILE] [--svg FILE]
                 [--inline] [--cards] [--no-rw-labels] [--straight-edges]
@@ -175,11 +216,11 @@ drawcode sync  <drawio> <files...> [--root DIR] [--write]
 drawcode inspect <artifact> [--out FILE] [--infer-edges]
 ```
 
-| 命令 | 作用 |
-| :--- | :--- |
-| `build` | 解析源码 → 构建 IR → 写出 `.drawio`。`--layout-from` 复用既有图的人工布局。`--svg` 额外产出一份只读预览，与 `.drawio` 共享同一套坐标。 |
-| `sync` | 读取 `.drawio` → 应用布局与注解属性 → 把**声明层**回写到源码。不加 `--write` 时是空跑。 |
-| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`），输出规范 JSON。不加载、不执行目标程序；PE `.dll` 由随附的 .NET sidecar 读取，ELF 与 `ar` 归档在进程内解析。 |
+| 命令 | 作用 | 哪些路径会用到 |
+| :--- | :--- | :--- |
+| `build` | 解析源码 → 构建 IR → 写出 `.drawio`。`--layout-from` 复用既有图的人工布局。`--svg` 额外产出一份只读预览，与 `.drawio` 共享同一套坐标。 | 路径 C |
+| `sync` | 读取 `.drawio` → 应用布局与注解属性 → 把**声明层**回写到源码。不加 `--write` 时是空跑。 | 路径 C |
+| `inspect` | 只读解析编译产物（`.dll` / `.so` / `.out` / `.a` / `.o`），输出规范 JSON。不加载、不执行目标程序；PE `.dll` 由随附的 .NET sidecar 读取，ELF 与 `ar` 归档在进程内解析。 | 路径 A、D |
 
 `--inline` 把「一写一读」的信号折叠成设备直连边，`--cards` 把带 `asset` 的函数画成图片卡片，
 `--no-rw-labels` 去掉边上的 `read`/`write`，`--straight-edges` 用直线替代正交布线。
@@ -253,6 +294,7 @@ drawcode 主张**让程序集代码本身承担这份概要**。一段声明层�
 | 测试与验证数字、性能特征 | [`docs/verification.md`](docs/verification.md) |
 | 在 VS Code 里浏览编译产物 | [`docs/vscode-extension.md`](docs/vscode-extension.md) |
 | 让自己的 C / C# 构建产物可读 | [`docs/templates.md`](docs/templates.md) |
+| 用 Agent 按思路生成孪生程序集 | [`docs/agent-prompts.md`](docs/agent-prompts.md) |
 | 跑一下仓库自带的示例工程 | [`docs/examples.md`](docs/examples.md) |
 | 构建、测试、加一门语言 | [`docs/contributing.md`](docs/contributing.md) |
 | 为下一门代码语言写适配层 | [`typescript/SKILL.md`](typescript/SKILL.md) |
