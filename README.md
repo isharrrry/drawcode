@@ -2,14 +2,96 @@
 
 **English** | [中文](README.zh-CN.md) | [Español](README.es.md)
 
-> Turn annotated C / C# source into an editable [draw.io](https://www.drawio.com/) dataflow diagram — and read your hand-made layout back into the code.
+> Let a compiled artifact explain the system skeleton: how modules cross-link, how signals flow,
+> which data is persistent. Browse assemblies in VS Code, or draw annotated sources as editable
+> [draw.io](https://www.drawio.com/) diagrams.
 
 Runs on Windows, Linux and macOS. The CLI has no third-party runtime dependencies: Node 22.6+.
 A .NET 10 runtime is needed only to read PE/CLI `.dll` artifacts through the bundled sidecar.
 
 ![drawcode output](docs/assets/small-c.png)
 
-## What problem it solves
+## What it is
+
+drawcode is for teams that **already have C / C# code and do not want to write a model first**.
+It does not ask for a separate modelling project — only for one layer of declarations inside the code.
+
+| Capability | What it does | Entry point |
+| :--- | :--- | :--- |
+| **Assembly browsing** (the main line) | Open a `.dll` / `.so` / `.out` / `.a` / `.o` and read its overview, module cross-links, signal data and persistence definitions; several artifacts can be organised into an assembly tree with groups and aliases | VS Code extension |
+| **Metadata templates** | Copy one header or attribute file, put cross-link direction, signal semantics and persistence markers into the declaration layer — that is what makes an artifact readable at all | [`docs/templates.md`](docs/templates.md) |
+| **Source to diagram** | A source file or a whole directory → `.drawio`; right-click in the explorer to generate in place, useful when you only want one local group of modules | Extension context menu / `build` |
+| **Artifact JSON** | Read structure back out of an artifact as canonical JSON, to post-process or feed your own tools | `inspect` |
+
+A complete implementation always runs ahead of its design document, and the thinking is always
+recorded later than the code. What is missing between those three is never another document — it is
+a summary that **compiles and evolves together with the code**: precise enough to build, structured
+enough to read architecture out of.
+
+drawcode puts that summary back into the code itself. One declaration layer is enough for an
+assembly to be both a runnable implementation and a system overview — and because it *is* the code,
+it cannot drift.
+
+## Browsing compiled artifacts
+
+`drawcode inspect` also powers a read-only VS Code viewer. Open a `.dll`, `.so`, `.out`, `.a` or
+`.o` and the custom editor shows what was compiled into it:
+
+- **Overview** — format, architecture, entity counts and reader diagnostics.
+- **Module cross-links** — a virtualized tree of modules, types, signals and functions; checking a
+  signal draws its flow in the left-hand wire gutter, from the writing row to the reading row.
+- **Persistent data** — types marked `Store` as ER tables, with field types and nested-type links.
+- **Assembly tree** — organise several artifacts into a tree, with groups, aliases and a bulk
+  "add from workspace".
+
+![Module cross-links: a checked port draws a wire from its writing row to its reading row](docs/assets/artifact-viewer.png)
+
+*Module cross-links: check a port and the wire runs from its writing row to its reading row; a
+struct signal's fields expand in the right-hand groupbox.*
+
+| Persistent data (`Store` types as ER tables) | C artifact, grouped by tag |
+| :---: | :---: |
+| ![persistent data view](docs/assets/artifact-viewer-store.png) | ![C artifact grouped by tag](docs/assets/artifact-viewer-c.png) |
+
+The extension bundles the same parsing core as the CLI (`readArtifact`) rather than starting an
+external process, and it never loads or executes the artifact. Prerequisites and settings live in
+[`docs/vscode-extension.md`](docs/vscode-extension.md).
+
+## Metadata templates: making an artifact readable
+
+How much can be read out of an artifact depends on how much you put into the declaration layer.
+Two templates each supply the minimal addition:
+
+- **C#** copy [`templates/csharp/DrawcodeAttributes.cs`](templates/csharp/DrawcodeAttributes.cs) and
+  annotate fields, properties, methods or types.
+- **C** copy [`templates/c/DrawcodeMeta.h`](templates/c/DrawcodeMeta.h) and the matching `.c`, and
+  write the declaration layer with macros; fixed-size records go into a custom section.
+
+Both templates share the same semantics and describe **only the declaration layer** (who reads and
+writes what, which type is persistent data, which module is a decomposition root). Neither records
+runtime behaviour — so `-O0` and `-O2` produce the same data.
+
+`size` and `offset` are computed by the compiler (via `sizeof` / `offsetof` on the C side). The
+difference between them is how strongly typed they are: C# uses attribute classes, so a misspelt
+property name or a wrong type **fails at compile time**; C uses string tags, so a misspelt key is
+silently ignored as an unknown tag.
+
+Parameter tables and build constraints (`--gc-sections`, `PublishTrimmed`) are in
+[`docs/templates.md`](docs/templates.md).
+
+## Source to diagram
+
+You do not have to compile first. **Right-click** a single source file or a whole folder in the
+explorer and pick "Generate Drawio diagram" to produce a `.drawio` in place (one file `Foo.cs` →
+`Foo.cs.drawio`; a folder `demo/` → `demo/demo.drawio`, recursively merging every supported source
+inside it). This is for seeing the cross-links between **a few modules**, not the whole project.
+
+Supported source extensions: `.c .h .cpp .hpp .cc .hh` on the C side, `.cs` on the C# side.
+
+## Why source code is the only source of truth
+
+The points below state the position for the *source → diagram* line. The assembly-browsing line
+rests on the same principle: code is the single source of truth.
 
 Most "code to diagram" tools generate a picture and stop there. The picture goes stale the moment
 someone edits the code, because **the diagram quietly becomes a second source of truth** — and two
@@ -75,29 +157,6 @@ functions as image cards, `--no-rw-labels` drops the `read`/`write` edge labels,
 `--straight-edges` replaces orthogonal routing with straight lines. Without them the output is
 byte-identical to the default behaviour.
 
-## Browsing compiled artifacts
-
-`drawcode inspect` also powers a read-only VS Code viewer. Open a `.dll`, `.so`, `.out`, `.a` or
-`.o` and the custom editor shows what was compiled into it:
-
-- **Overview** — format, architecture, entity counts and reader diagnostics.
-- **Module cross-links** — a virtualized tree of modules, types, signals and functions; checking a
-  signal draws its flow in the left-hand wire gutter, from the writing row to the reading row.
-- **Persistent data** — types marked `Store` as ER tables, with field types and nested-type links.
-
-![Module cross-links: a checked port draws a wire from its writing row to its reading row](docs/assets/artifact-viewer.png)
-
-*Module cross-links: check a port and the wire runs from its writing row to its reading row; a
-struct signal's fields expand in the right-hand groupbox.*
-
-| Persistent data (`Store` types as ER tables) | C artifact, grouped by tag |
-| :---: | :---: |
-| ![persistent data view](docs/assets/artifact-viewer-store.png) | ![C artifact grouped by tag](docs/assets/artifact-viewer-c.png) |
-
-Prerequisites and settings live in [`docs/vscode-extension.md`](docs/vscode-extension.md). The
-extension bundles the same parsing core as the CLI (`readArtifact`) rather than starting an external
-CLI, and it never loads or executes the artifact.
-
 ## Core concepts
 
 1. **One persistent source, one derived artefact.** Code is the fact; the `.drawio` is a view plus
@@ -118,6 +177,36 @@ CLI, and it never loads or executes the artifact.
    unreadable payload raises instead of returning empty. Format details:
    [`docs/drawio-format.md`](docs/drawio-format.md).
 
+## Trade-offs against SysML v2
+
+drawcode does not do what SysML v2 does. The table below is a trade-off, not a capability
+comparison — the two solve problems at different layers.
+
+| Dimension | drawcode | SysML v2 |
+| :--- | :--- | :--- |
+| Audience and learning curve | Teams already fluent in C / C#; a dozen annotation keys, no new language | Cross-discipline systems engineering teams; requires the SysML v2 / KerML semantic stack |
+| Existing code | Read straight from existing artifacts, no refactoring | Models must be rebuilt |
+| Impact on the existing build | Copy one template file, zero intrusion | Requires a modelling tool and a build process around it |
+| Reading structure back out of a binary | **Yes** (`.dll` / `.so` / `.out` / `.a` / `.o`) | No |
+| Source of truth and drift | The source or artifact is the only source of truth; nothing else to maintain | The model is the primary artifact; model and code are both maintained by hand |
+| Compile-time checking | `size` / `offset` are computed by the compiler (`sizeof` / `offsetof` on the C side); C# uses strongly typed attributes, so a misspelt property or wrong type fails at compile time; C uses string tags, where a misspelt key is silently ignored as unknown | Model-level semantic validation, but it says nothing about whether the model matches the implementation |
+| Behaviour and timing | Interaction flow (module cross-links, signal read/write paths); state machines and sequence diagrams are **not supported** | Yes (state machines, interactions, timing) |
+| Diagrams and export | Emits standard `.drawio`; PNG / SVG export and "re-open a PNG in draw.io" are handled by draw.io's own tooling, deliberately not reimplemented here | Layout and export are managed by the modelling tool |
+| Version control | Source and `.drawio` are both text, plain `git diff` works | Textual notation is git-friendly too, but needs a separate model repository |
+| Standardisation and ecosystem | MIT, open source in this repository; a private convention, no third-party tool interoperability | An OMG standard (v2.0 adopted 2025-09, Document Status: formal) with Boeing, Airbus, Lockheed Martin, Siemens, Dassault Systèmes, Ansys, MathWorks, IBM, PTC and Sparx Systems among the contributors |
+| Agent assistance | Annotations *are* the structure, output is deterministic text (goldens compared byte-for-byte), and `SKILL.md` is written for the next **code-language adapter** | The textual notation can be read and written by agents too, but only after the whole semantic stack is understood |
+
+**Which to choose**
+
+- You have a large C / C# codebase, you only want the assembly to explain its own structure, and
+  you do not want to touch the build → drawcode.
+- The organisation needs requirements traceability, verification cases, parametric analysis or
+  multi-discipline collaboration → SysML v2.
+
+The two are not mutually exclusive: drawcode can serve as a read-only view of a SysML model at the
+implementation side. The model says what *should* be there; the artifact says what *is* there, and
+the difference is the list that needs reconciling.
+
 ## Documentation
 
 | To learn about | Read |
@@ -131,7 +220,7 @@ CLI, and it never loads or executes the artifact.
 | Making your own C/C# build readable | [`docs/templates.md`](docs/templates.md)（中文） |
 | Running the bundled sample projects | [`docs/examples.md`](docs/examples.md) |
 | Building, testing, adding a language | [`docs/contributing.md`](docs/contributing.md) |
-| How to implement this capability yourself | [`typescript/SKILL.md`](typescript/SKILL.md) |
+| Adding the next code-language adapter | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
 ## Development
 
@@ -191,6 +280,8 @@ parsing. This is stated as a characteristic, not hidden as a rounding error.
 - **Mixed-language single diagrams are not symbol-resolved.** C and C# models can be merged, but a
   cross-language reference to the same name is not resolved.
 - **Multi-page / multi-view, layers and tag filtering are not wired to the CLI.**
+- **State machines and sequence diagrams are not supported.** Module cross-links and signal
+  read/write paths are the only interaction flow modelled today.
 - **Geometry is frozen to the goldens.** A quicker layout algorithm is welcome only if it changes
   *how fast* geometry is computed, not *what* geometry is produced — otherwise every golden case
   diffs, and hand-made layouts stop matching.

@@ -1,6 +1,6 @@
 # SKILL — 用 TypeScript 实现「源码 ↔ drawio」转换
 
-面向**下一个要加一门语言解析器的人**，也面向任何要在 Node 里做同类图转换的人。
+面向**下一个要为 drawcode 接入一门代码语言的适配者**，也面向任何要在 Node 里做同类图转换的人。
 
 参考实现就是本包（`typescript/src/`）。判定口径在 `../docs/conformance.md`（四个比较层次）。
 早期的 Python 参考实现与 .NET 实现已于 2026-10-21 退役（仍留在 git 历史中）；本包生成的

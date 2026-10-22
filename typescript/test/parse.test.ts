@@ -385,7 +385,7 @@ test("C#: Unicode names parse; record declarations stay outside the graph", () =
         "    public static T 泛型生成<T>(T 关系) { return 关系; }",
         "    public static coder输出 coder(coder输入 input)",
         "    {",
-        "        测试桩.消费(input);",
+        "        测试桩.处理(input);",
         "        a1_数据包 = 生成();",
         "        return default!;",
         "    }",

@@ -2,15 +2,99 @@
 
 [English](README.md) | [中文](README.zh-CN.md) | **Español**
 
-> Convierte código C / C# anotado en un diagrama de flujo de datos editable de [draw.io](https://www.drawio.com/) — y 
-> vuelve a leer en el código el diseño que hayas hecho a mano.
+> Deja que el artefacto compilado explique el esqueleto del sistema: cómo se interconectan los módulos,
+> cómo fluyen las señales, qué datos son persistentes. Explora los ensamblados en VS Code, o dibuja
+> el código fuente anotado como diagramas editables de [draw.io](https://www.drawio.com/).
 
 Funciona en Windows, Linux y macOS. La CLI no tiene dependencias de ejecución de terceros: Node 22.6+.
 Solo hace falta un runtime .NET 10 para leer artefactos PE/CLI `.dll` mediante el sidecar incluido.
 
 ![drawcode output](docs/assets/small-c.png)
 
-## Qué problema resuelve
+## Qué es
+
+drawcode es para equipos que **ya tienen código C / C# y no quieren escribir un modelo primero**.
+No exige un proyecto de modelado aparte — solo una capa de declaraciones dentro del código.
+
+| Capacidad | Qué hace | Punto de entrada |
+| :--- | :--- | :--- |
+| **Exploración de ensamblados** (la línea principal) | Abre un `.dll` / `.so` / `.out` / `.a` / `.o` y lee su resumen, las interconexiones entre módulos, los datos de señal y las definiciones de persistencia; varios artefactos pueden organizarse en un árbol de ensamblados con grupos y alias | Extensión de VS Code |
+| **Plantillas de metadatos** | Copia un fichero de cabecera o de atributos y pon la dirección de interconexión, la semántica de señal y las marcas de persistencia en la capa de declaración — eso es lo que hace legible un artefacto | [`docs/templates.md`](docs/templates.md) |
+| **Fuente a diagrama** | Un fichero fuente o una carpeta entera → `.drawio`; clic derecho en el explorador para generar en el sitio, útil cuando solo quieres un grupo local de módulos | Menú contextual de la extensión / `build` |
+| **JSON del artefacto** | Relee la estructura del artefacto como JSON canónico, para posprocesar o alimentar tus propias herramientas | `inspect` |
+
+Una implementación completa siempre va por delante de su documento de diseño, y el pensamiento se
+registra siempre después del código. Lo que falta entre esos tres nunca es otro documento: es un
+resumen que **se compila y evoluciona junto con el código**, lo bastante preciso para compilar y lo
+bastante estructurado para leer arquitectura de él.
+
+drawcode devuelve ese resumen al propio código. Una capa de declaración basta para que un ensamblado
+sea a la vez una implementación ejecutable y una visión general del sistema — y como *es* el código,
+no puede desviarse.
+
+## Explorar artefactos compilados
+
+`drawcode inspect` también alimenta un visor de solo lectura en VS Code. Abre un `.dll`, `.so`,
+`.out`, `.a` o `.o` y el editor personalizado muestra lo que se compiló dentro:
+
+- **Resumen** — formato, arquitectura, recuento de entidades y diagnósticos del lector.
+- **Interconexión de módulos** — un árbol virtualizado de módulos, tipos, señales y funciones; al
+  marcar una señal se dibuja su flujo en la canaleta izquierda, desde la fila que escribe hasta la
+  que lee.
+- **Datos persistentes** — los tipos marcados con `Store` como tablas ER, con tipos de campo y
+  enlaces a tipos anidados.
+- **Árbol de ensamblados** — organiza varios artefactos en un árbol, con grupos, alias y alta
+  masiva «añadir desde el espacio de trabajo».
+
+![Interconexión de módulos: al marcar un puerto se dibuja un cable desde su fila de escritura hasta la de lectura](docs/assets/artifact-viewer.png)
+
+*Interconexión de módulos: marca un puerto y el cable va de su fila de escritura a su fila de
+lectura; los campos de una señal de tipo struct se despliegan en el grupo de la derecha.*
+
+| Datos persistentes (tipos `Store` como tablas ER) | Artefacto C, agrupado por etiqueta |
+| :---: | :---: |
+| ![vista de datos persistentes](docs/assets/artifact-viewer-store.png) | ![artefacto C agrupado por etiqueta](docs/assets/artifact-viewer-c.png) |
+
+La extensión incorpora el mismo núcleo de análisis que la CLI (`readArtifact`) en lugar de lanzar un
+proceso externo, y nunca carga ni ejecuta el artefacto. Requisitos y ajustes en
+[`docs/vscode-extension.md`](docs/vscode-extension.md).
+
+## Plantillas de metadatos: hacer legible un artefacto
+
+Cuánto se puede leer de un artefacto depende de cuánto pongas en la capa de declaración. Dos
+plantillas aportan cada una el añadido mínimo:
+
+- **C#**: copia [`templates/csharp/DrawcodeAttributes.cs`](templates/csharp/DrawcodeAttributes.cs) y
+  anota campos, propiedades, métodos o tipos.
+- **C**: copia [`templates/c/DrawcodeMeta.h`](templates/c/DrawcodeMeta.h) y el `.c` correspondiente,
+  y escribe la capa de declaración con macros; los registros de tamaño fijo van a una sección propia.
+
+Ambas plantillas comparten la misma semántica y describen **solo la capa de declaración** (quién lee
+y escribe qué, qué tipo es dato persistente, qué módulo es raíz de la descomposición). Ninguna
+registra comportamiento en tiempo de ejecución — así que `-O0` y `-O2` producen los mismos datos.
+
+`size` y `offset` los calcula el compilador (con `sizeof` / `offsetof` en el lado C). La diferencia
+entre ambas es el grado de tipado: C# usa clases de atributo, así que un nombre de propiedad mal
+escrito o un tipo incorrecto **falla en tiempo de compilación**; C usa etiquetas de texto, así que
+una clave mal escrita se ignora en silencio como etiqueta desconocida.
+
+Las tablas de parámetros y las restricciones de compilación (`--gc-sections`, `PublishTrimmed`)
+están en [`docs/templates.md`](docs/templates.md).
+
+## Fuente a diagrama
+
+No hace falta compilar primero. **Haz clic derecho** en un fichero fuente o en una carpeta del
+explorador y elige «Generar diagrama Drawio» para producir un `.drawio` en el sitio (un fichero
+`Foo.cs` → `Foo.cs.drawio`; una carpeta `demo/` → `demo/demo.drawio`, fusionando recursivamente
+todas las fuentes soportadas que contenga). Sirve para ver las interconexiones entre **unos pocos
+módulos**, no el proyecto entero.
+
+Extensiones de fuente soportadas: `.c .h .cpp .hpp .cc .hh` en el lado C, `.cs` en el lado C#.
+
+## Por qué el código fuente es la única fuente de verdad
+
+Los puntos siguientes exponen la postura de la línea *fuente → diagrama*. La línea de exploración
+de ensamblados se apoya en el mismo principio: el código es la única fuente de verdad.
 
 La mayoría de las herramientas de «código a diagrama» generan una imagen y se detienen ahí. La imagen queda obsoleta 
 en el momento en que alguien edita el código, porque **el diagrama se convierte en silencio en una segunda fuente de 
@@ -94,6 +178,36 @@ líneas rectas. Sin ellos, la salida es idéntica byte a byte al comportamiento 
    descartar la disposición hecha a mano por el usuario. Aquí se leen ambas formas, y una carga ilegible lanza una 
    excepción en lugar de devolver vacío. Detalles del formato: [`docs/drawio-format.md`](docs/drawio-format.md).
 
+## Compromisos frente a SysML v2
+
+drawcode no hace lo que hace SysML v2. La tabla siguiente es un compromiso, no una comparación de
+capacidades — los dos resuelven problemas en capas distintas.
+
+| Dimensión | drawcode | SysML v2 |
+| :--- | :--- | :--- |
+| Público y curva de aprendizaje | Equipos que ya dominan C / C#; una docena de claves de anotación, sin lenguaje nuevo | Equipos de ingeniería de sistemas multidisciplinar; exige el stack semántico SysML v2 / KerML |
+| Código existente | Se lee directamente de los artefactos ya construidos, sin refactorizar | Hay que reconstruir los modelos |
+| Impacto en la compilación existente | Copiar un fichero de plantilla, intrusión cero | Requiere una herramienta de modelado y un proceso de compilación a su alrededor |
+| Leer la estructura de un binario ya existente | **Sí** (`.dll` / `.so` / `.out` / `.a` / `.o`) | No |
+| Fuente de verdad y deriva | La fuente o el artefacto es la única fuente de verdad; no hay nada más que mantener | El modelo es el artefacto principal; modelo y código se mantienen ambos a mano |
+| Comprobación en compilación | `size` / `offset` los calcula el compilador (`sizeof` / `offsetof` en el lado C); C# usa atributos fuertemente tipados, así que una propiedad mal escrita o un tipo incorrecto falla en compilación; C usa etiquetas de texto, donde una clave mal escrita se ignora en silencio | Validación semántica a nivel de modelo, pero no dice si el modelo coincide con la implementación |
+| Comportamiento y tiempo | Flujo de interacción (interconexión de módulos, caminos de lectura/escritura de señal); las máquinas de estado y los diagramas de secuencia **no están soportados** | Sí (máquinas de estado, interacciones, tiempo) |
+| Diagramas y exportación | Emite `.drawio` estándar; la exportación a PNG / SVG y el «reabrir un PNG en draw.io» los cubren las herramientas oficiales de draw.io, y aquí no se reimplementan a propósito | El diseño y la exportación los gestiona la herramienta de modelado |
+| Control de versiones | Fuente y `.drawio` son ambos texto, `git diff` normal funciona | La notación textual también es apta para git, pero necesita un repositorio de modelo aparte |
+| Estandarización y ecosistema | MIT, código abierto en este repositorio; convención propia, sin interoperabilidad con herramientas de terceros | Estándar de OMG (v2.0 adoptada en 2025-09, Document Status: formal) con Boeing, Airbus, Lockheed Martin, Siemens, Dassault Systèmes, Ansys, MathWorks, IBM, PTC y Sparx Systems entre los colaboradores |
+| Asistencia de agentes | Las anotaciones *son* la estructura, la salida es texto determinista (dorados comparados byte a byte) y `SKILL.md` está escrito para el siguiente **adaptador de lenguaje** | La notación textual también puede ser leída y escrita por agentes, pero solo tras entender todo el stack semántico |
+
+**Cuál elegir**
+
+- Tienes una base de código C / C# grande, solo quieres que el ensamblado explique su propia
+  estructura y no quieres tocar la compilación → drawcode.
+- La organización necesita trazabilidad de requisitos, casos de verificación, análisis paramétrico
+  o colaboración multidisciplinar → SysML v2.
+
+No son mutuamente excluyentes: drawcode puede servir como vista de solo lectura de un modelo SysML
+en el lado de la implementación. El modelo dice lo que *debería* haber; el artefacto dice lo que
+*hay*, y la diferencia es la lista que hay que reconciliar.
+
 ## Documentación
 
 | Para saber sobre | Lee |
@@ -102,8 +216,12 @@ líneas rectas. Sin ellos, la salida es idéntica byte a byte al comportamiento 
 | Cada clave de anotación, con tipos y valores por defecto | [`docs/annotations.md`](docs/annotations.md) |
 | Mapeo de `.drawio`, reglas de enrutado, semántica de coordenadas | [`docs/drawio-format.md`](docs/drawio-format.md) |
 | Qué fijan los casos dorados y por qué están congelados | [`docs/conformance.md`](docs/conformance.md) |
+| El JSON `ArtifactModel` que emite `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
+| Explorar un artefacto compilado en VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
+| Hacer legible tu propia compilación de C/C# | [`docs/templates.md`](docs/templates.md)（中文） |
+| Ejecutar los proyectos de ejemplo incluidos | [`docs/examples.md`](docs/examples.md) |
 | Compilar, probar, añadir un lenguaje | [`docs/contributing.md`](docs/contributing.md) |
-| Implementar esta capacidad tú mismo | [`typescript/SKILL.md`](typescript/SKILL.md) |
+| Escribir el adaptador para el siguiente lenguaje | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
 ## Desarrollo
 
@@ -164,6 +282,8 @@ milisegundos al análisis. Esto se declara como una característica, no se escon
 - **Los diagramas únicos con varios lenguajes no se resuelven por símbolo.** Los modelos de C y C# pueden fusionarse, 
   pero una referencia entre lenguajes al mismo nombre no se resuelve.
 - **La multipágina / multívista, las capas y el filtrado por etiquetas no están conectados a la CLI.**
+- **Las máquinas de estado y los diagramas de secuencia no están soportados.** La interconexión de
+  módulos y los caminos de lectura/escritura de señal son el único flujo de interacción modelado hoy.
 - **La geometría está congelada en los dorados.** Un algoritmo de diseño más rápido es bienvenido solo si cambia
   *lo rápido* que se calcula la geometría, nunca *qué* geometría se produce — de lo contrario todos los casos
   dorados divergen y los diseños hechos a mano dejan de coincidir.
