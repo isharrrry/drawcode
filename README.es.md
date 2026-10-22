@@ -13,8 +13,8 @@ Solo hace falta un runtime .NET 10 para leer artefactos PE/CLI `.dll` mediante e
 
 ## Qué es
 
-drawcode es para equipos que **ya tienen código C / C# y no quieren escribir un modelo primero**.
-No exige un proyecto de modelado aparte — solo una capa de declaraciones dentro del código.
+drawcode hace que **el propio código del ensamblado sea el modelo-resumen del gemelo digital del
+sistema**: sin un proyecto de modelado aparte, solo una capa de declaraciones dentro del código.
 
 | Capacidad | Qué hace | Punto de entrada |
 | :--- | :--- | :--- |
@@ -197,12 +197,30 @@ capacidades — los dos resuelven problemas en capas distintas.
 | Estandarización y ecosistema | MIT, código abierto en este repositorio; convención propia, sin interoperabilidad con herramientas de terceros | Estándar de OMG (v2.0 adoptada en 2025-09, Document Status: formal) con Boeing, Airbus, Lockheed Martin, Siemens, Dassault Systèmes, Ansys, MathWorks, IBM, PTC y Sparx Systems entre los colaboradores |
 | Asistencia de agentes | Las anotaciones *son* la estructura, la salida es texto determinista (dorados comparados byte a byte) y `SKILL.md` está escrito para el siguiente **adaptador de lenguaje** | La notación textual también puede ser leída y escrita por agentes, pero solo tras entender todo el stack semántico |
 
+**Por qué elegirlo**
+
+La intención vive en los documentos de diseño, el diseño aterriza en una implementación completa, y
+siempre hay una brecha entre los tres: el documento no sigue el ritmo del código, y el código no se
+puede releer como diseño. El remedio habitual es otro documento de modelado — que empieza a
+envejecer en el momento en que se escribe.
+
+drawcode sostiene que **el propio ensamblado debe cargar con ese resumen**. Una capa de declaración
+entra en el código fuente, viaja con la compilación hasta el artefacto, y ese mismo ensamblado es a
+la vez una implementación ejecutable y un **resumen estructurado del gemelo digital del sistema**:
+cómo se interconectan los módulos, cómo fluyen las señales, qué datos son persistentes, qué módulos
+son raíces de la descomposición. Lo bastante preciso para compilar y lo bastante estructurado para
+leer arquitectura de él.
+
+Esa es su posición: el puente entre la intención, el diseño y la implementación completa. Y como el
+puente se apoya en el propio código, no puede desviarse por su cuenta.
+
 **Cuál elegir**
 
-- Tienes una base de código C / C# grande, solo quieres que el ensamblado explique su propia
-  estructura y no quieres tocar la compilación → drawcode.
+- Quieres que el código del ensamblado sea a la vez el **resumen estructurado del gemelo digital del
+  sistema**, para que la implementación declare su propia estructura y conecte intención, diseño e
+  implementación → drawcode.
 - La organización necesita trazabilidad de requisitos, casos de verificación, análisis paramétrico
-  o colaboración multidisciplinar → SysML v2.
+  o colaboración multidisciplinar, y el modelo debe existir con independencia del código → SysML v2.
 
 No son mutuamente excluyentes: drawcode puede servir como vista de solo lectura de un modelo SysML
 en el lado de la implementación. El modelo dice lo que *debería* haber; el artefacto dice lo que
@@ -216,6 +234,7 @@ en el lado de la implementación. El modelo dice lo que *debería* haber; el art
 | Cada clave de anotación, con tipos y valores por defecto | [`docs/annotations.md`](docs/annotations.md) |
 | Mapeo de `.drawio`, reglas de enrutado, semántica de coordenadas | [`docs/drawio-format.md`](docs/drawio-format.md) |
 | Qué fijan los casos dorados y por qué están congelados | [`docs/conformance.md`](docs/conformance.md) |
+| Cifras de prueba y verificación, características de rendimiento | [`docs/verification.md`](docs/verification.md) |
 | El JSON `ArtifactModel` que emite `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
 | Explorar un artefacto compilado en VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
 | Hacer legible tu propia compilación de C/C# | [`docs/templates.md`](docs/templates.md)（中文） |
@@ -233,33 +252,8 @@ cd editors/vscode && node --test test/*.test.mjs    # pruebas de la extensión
 El sidecar PE de `tools/drawcode-metadata/` es .NET 10 puro y solo se compila/ejecuta cuando `inspect` lee un
 `.dll`; el resto de la cadena de herramientas solo necesita Node 22.6+.
 
-## Verificación medida
-
-**Ningún número de este repositorio es una estimación.** Cada cifra de abajo se produjo ejecutando el comando de la 
-misma columna.
-
-| Afirmación | Cómo se midió | Resultado |
-| :--- | :--- | :--- |
-| La implementación TypeScript es correcta | `cd typescript && node --test` | **211 tests, 0 fallos, 3 omitidos** |
-| Pruebas de la extensión | `cd editors/vscode && node --test test/*.test.mjs` | **79 tests, 0 fallos** |
-| El `.drawio` comprimido se lee correctamente | Releer un fichero dorado comprimido con draw.io | **nodes=6, edges=6, attrs=6** — idéntico a la forma plana |
-| Una carga ilegible no falla en silencio | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | lanza una excepción (nunca devuelve un diseño vacío) |
-| El `.drawio` generado es válido según el esquema | Validación XSD contra `tools/xsd/mxfile.xsd` | **3/3 pasan** (C, C# y un diagrama con puntos intermedios) |
-| Ida y vuelta idempotente | Compilar → sincronizar → compilar, comparar | **cero cambios en la segunda sincronización** |
-| El IR dorado se reproduce exactamente | `dump-ir` comparado byte a byte con `tools/golden/*/expected.ir.json` | **idéntico en ambos casos dorados** |
-
-Las cifras de rendimiento del benchmark de 2026-10 (diseño cuadrático en número de módulos, análisis
-lineal) se tomaron sobre la implementación de referencia Python, ya retirada; se conservan aquí porque
-los algoritmos son los mismos, marcadas como históricas y no actuales.
-
-| Afirmación | Cómo se midió | Resultado |
-| :--- | :--- | :--- |
-| Coste del diseño (histórico, Python) | 5/10/20/40/80 módulos | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s — **superlineal** |
-| Coste del análisis (histórico, Python) | las mismas | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms — lineal |
-
-**El análisis escala linealmente mientras que el diseño es cuadrático.** Enrutar cada arista prueba rutas
-candidatas contra todos los demás nodos, así que un proyecto de 80 módulos dedica 95 segundos al diseño y 53
-milisegundos al análisis. Esto se declara como una característica, no se esconde como un error de redondeo.
+Las cifras actuales de prueba y verificación (número de tests, idempotencia, esquema, reproducción de
+los dorados, características de rendimiento) están en [`docs/verification.md`](docs/verification.md).
 
 ## Limitaciones conocidas (enumeradas con honestidad)
 

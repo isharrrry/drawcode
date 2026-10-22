@@ -12,8 +12,7 @@
 
 ## 它是什么
 
-drawcode 面向**已经有 C / C# 代码、不打算先写模型**的团队：不要求另起一份建模工程，
-只要求在代码里补一层声明。
+drawcode 让**程序集代码本身成为系统的孪生概要建模代码**：不另起一份建模工程，只在代码里补一层声明。
 
 | 能力 | 做什么 | 入口 |
 | :--- | :--- | :--- |
@@ -175,10 +174,21 @@ drawcode 不做 SysML v2 能做的事。下表是取舍，不是能力对比 —
 | 标准化与生态 | MIT，开源在本仓；自有约定，无第三方工具互操作 | OMG 标准（2.0 版 2025-09 通过，Document Status: formal），Boeing、Airbus、Lockheed Martin、Siemens、Dassault Systèmes、Ansys、MathWorks、IBM、PTC、Sparx Systems 等厂商参与制定 |
 | Agent 辅助 | 注解即结构、输出确定性文本（金标准逐字节比对）、`SKILL.md` 写给下一个代码语言适配者 | 文本记法同样可被 agent 读写，但需先掌握一整套语义体系 |
 
+**为什么选它**
+
+思路落在设计文档里，设计落进完整实现里，三者之间总有落差：文档跟不上代码，代码又读不出设计。
+通常的补救是再写一份建模文档，可它从写下那一刻就开始过期。
+
+drawcode 主张**让程序集代码本身承担这份概要**。一段声明层元数据写进源码，随编译一起进入产物，
+于是同一个程序集既是可运行的完整实现，又是一份**结构化的系统孪生概要**：模块怎么交联、信号怎么
+流转、哪些数据要持久化、哪些模块是分解根。它精确到能编译，又结构化到能读出架构。
+
+这就是它的位置 —— 在思路、设计、完整实现之间做那座桥，而且因为桥就架在代码上，它不会单独漂移。
+
 **什么时候选哪个**
 
-- 已有大量 C / C# 代码，只想让程序集把结构讲清楚，且不想动构建流程 → drawcode。
-- 组织层面要做需求追溯、验证案例、参数化分析、多专业协同 → SysML v2。
+- 你希望程序集代码同时是**系统的孪生概要建模代码**，让实现本身能讲出结构，并把思路、设计与完整实现连起来 → drawcode。
+- 组织层面要做需求追溯、验证案例、参数化分析、多专业协同，模型需要先于代码独立存在 → SysML v2。
 
 两者不互斥：drawcode 可以作为 SysML 模型在实现侧的只读视图 —— 模型说「应该是什么」，
 从产物读出来的说「实际是什么」，两者的差就是需要核对的清单。
@@ -191,6 +201,7 @@ drawcode 不做 SysML v2 能做的事。下表是取舍，不是能力对比 —
 | 每一个注解键，含类型与默认值 | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` 映射、路由规则、坐标系语义 | [`docs/drawio-format.md`](docs/drawio-format.md) |
 | 金标准钉住了什么、为什么冻结 | [`docs/conformance.md`](docs/conformance.md) |
+| 测试与验证数字、性能特征 | [`docs/verification.md`](docs/verification.md) |
 | 在 VS Code 里浏览编译产物 | [`docs/vscode-extension.md`](docs/vscode-extension.md) |
 | 让自己的 C / C# 构建产物可读 | [`docs/templates.md`](docs/templates.md) |
 | 跑一下仓库自带的示例工程 | [`docs/examples.md`](docs/examples.md) |
@@ -207,31 +218,8 @@ cd editors/vscode && node --test test/*.test.mjs   # 扩展测试（不依赖扩
 `tools/drawcode-metadata/` 下的 PE sidecar 是纯 .NET 10，只在 `inspect` 读 `.dll` 时才构建/运行；
 工具链其余部分只需要 Node 22.6+。
 
-## 实测验证
-
-**本仓库没有任何一个数字是估计的。** 下表中每一个数字都是由同一列的命令跑出来的。
-
-| 主张 | 如何测量 | 结果 |
-| :--- | :--- | :--- |
-| TypeScript 实现是正确的 | `cd typescript && node --test` | **211 个测试，0 失败，3 跳过** |
-| 扩展测试 | `cd editors/vscode && node --test test/*.test.mjs` | **79 个测试，0 失败** |
-| 压缩态 `.drawio` 被正确读取 | 读回一个 draw.io 压缩过的金标准文件 | **nodes=6, edges=6, attrs=6** —— 与纯文本形态完全相同 |
-| 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛错（绝不返回空布局） |
-| 生成的 `.drawio` 符合 schema | 对着 `tools/xsd/mxfile.xsd` 做 XSD 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |
-| 往返幂等 | 构建 → sync → 构建，比较 | **第二次 sync 零改动** |
-| 金标准 IR 被精确复现 | `dump-ir` 与 `tools/golden/*/expected.ir.json` 逐字节比对 | **两个金标准用例均完全一致** |
-
-2026-10 基准测试得到的性能数字（布局随模块数呈二次增长、解析线性）是在已退役的 Python
-参考实现上测的；这里保留它们，是因为算法相同，但明确标注为历史数据而非当前数据。
-
-| 主张 | 如何测量 | 结果 |
-| :--- | :--- | :--- |
-| 布局开销（历史，Python） | 5/10/20/40/80 个模块 | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s —— **超线性** |
-| 解析开销（历史，Python） | 同上 | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms —— 线性 |
-
-**解析是线性扩展的，而布局是二次的。** 路由每条边都要拿候选路径去试所有其它节点，
-所以一个 80 模块的工程会在布局上花 95 秒，而解析只花 53 毫秒。这一点是作为特征写出来的，
-而不是当作舍入误差藏起来。
+当前测试与验证数字（测试条数、幂等、schema、金标准复现、性能特征）见
+[`docs/verification.md`](docs/verification.md)。
 
 ## 已知限制（诚实列出）
 

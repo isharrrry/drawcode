@@ -31,6 +31,7 @@ version.
 | Add a new source language (Rust, Go, …) | [Architecture](architecture.md#module-layering) → [Contributing](contributing.md) |
 | Implement the whole capability yourself | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 | Know what the conformance suite compares | [`conformance.md`](conformance.md) |
+| See the measured test and verification figures | [`verification.md`](verification.md) |
 | Make a compiled artifact readable | [Templates](templates.md) *(中文)* |
 | Browse an assembly in VS Code | [VS Code extension](vscode-extension.md) *(中文)* |
 | Run the committed sample projects | [Examples](examples.md) |

@@ -13,8 +13,8 @@ A .NET 10 runtime is needed only to read PE/CLI `.dll` artifacts through the bun
 
 ## What it is
 
-drawcode is for teams that **already have C / C# code and do not want to write a model first**.
-It does not ask for a separate modelling project — only for one layer of declarations inside the code.
+drawcode lets **the assembly code itself be the digital-twin summary model of the system**: no
+separate modelling project — just one layer of declarations inside the code.
 
 | Capability | What it does | Entry point |
 | :--- | :--- | :--- |
@@ -196,12 +196,28 @@ comparison — the two solve problems at different layers.
 | Standardisation and ecosystem | MIT, open source in this repository; a private convention, no third-party tool interoperability | An OMG standard (v2.0 adopted 2025-09, Document Status: formal) with Boeing, Airbus, Lockheed Martin, Siemens, Dassault Systèmes, Ansys, MathWorks, IBM, PTC and Sparx Systems among the contributors |
 | Agent assistance | Annotations *are* the structure, output is deterministic text (goldens compared byte-for-byte), and `SKILL.md` is written for the next **code-language adapter** | The textual notation can be read and written by agents too, but only after the whole semantic stack is understood |
 
+**Why choose it**
+
+Intent lives in design documents, design lands in a complete implementation, and there is always a
+gap between the three: the document cannot keep up with the code, and the code cannot be read back
+as design. The usual remedy is another modelling document — which starts ageing the moment it is
+written.
+
+drawcode argues that **the assembly itself should carry that summary**. One declaration layer goes
+into the source, rides the build into the artifact, and the same assembly is then both a runnable
+implementation and a **structured digital-twin summary of the system**: how modules cross-link, how
+signals flow, which data is persistent, which modules are decomposition roots. Precise enough to
+compile, structured enough to read architecture out of.
+
+That is its position — the bridge between intent, design and complete implementation. And because
+the bridge is built on the code itself, it cannot drift on its own.
+
 **Which to choose**
 
-- You have a large C / C# codebase, you only want the assembly to explain its own structure, and
-  you do not want to touch the build → drawcode.
+- You want the assembly code itself to be the **digital-twin summary of the system**, so the
+  implementation can state its own structure and connect intent, design and implementation → drawcode.
 - The organisation needs requirements traceability, verification cases, parametric analysis or
-  multi-discipline collaboration → SysML v2.
+  multi-discipline collaboration, and the model must exist independently of the code → SysML v2.
 
 The two are not mutually exclusive: drawcode can serve as a read-only view of a SysML model at the
 implementation side. The model says what *should* be there; the artifact says what *is* there, and
@@ -215,6 +231,7 @@ the difference is the list that needs reconciling.
 | Every annotation key, with types and defaults | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` mapping, routing rules, coordinate semantics | [`docs/drawio-format.md`](docs/drawio-format.md) |
 | What the golden cases pin, and why they are frozen | [`docs/conformance.md`](docs/conformance.md) |
+| Test and verification figures, performance characteristics | [`docs/verification.md`](docs/verification.md) |
 | The `ArtifactModel` JSON emitted by `inspect` | [`docs/artifact-format.md`](docs/artifact-format.md) |
 | Browsing a compiled artifact in VS Code | [`docs/vscode-extension.md`](docs/vscode-extension.md)（中文） |
 | Making your own C/C# build readable | [`docs/templates.md`](docs/templates.md)（中文） |
@@ -232,33 +249,8 @@ cd editors/vscode && node --test test/*.test.mjs   # extension host-free tests
 The PE sidecar under `tools/drawcode-metadata/` is plain .NET 10 and is only built/run when
 `inspect` reads a `.dll`; the rest of the toolchain needs nothing but Node 22.6+.
 
-## Measured verification
-
-**No number in this repository is estimated.** Every figure below was produced by running the
-command in the same column.
-
-| Claim | How it was measured | Result |
-| :--- | :--- | :--- |
-| TypeScript implementation is correct | `cd typescript && node --test` | **211 tests, 0 failures, 3 skipped** |
-| Extension tests | `cd editors/vscode && node --test test/*.test.mjs` | **79 tests, 0 failures** |
-| Compressed `.drawio` is read correctly | Read back a draw.io-compressed golden file | **nodes=6, edges=6, attrs=6** — identical to the plain form |
-| Unreadable payload does not fail silently | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | throws (never returns an empty layout) |
-| Generated `.drawio` is schema-valid | XSD validation against `tools/xsd/mxfile.xsd` | **3/3 pass** (C, C#, and a waypoint-carrying diagram) |
-| Idempotent round-trip | Build → sync → build, compare | **zero changes on the second sync** |
-| Golden IR reproduced exactly | `dump-ir` compared byte-for-byte with `tools/golden/*/expected.ir.json` | **identical in both golden cases** |
-
-The measured performance figures from the 2026-10 benchmark (layout quadratic in module count,
-parse linear) were taken on the retired Python reference implementation; they are kept here
-because the algorithms are the same, and are marked as historical rather than current.
-
-| Claim | How it was measured | Result |
-| :--- | :--- | :--- |
-| Layout cost (historical, Python) | 5/10/20/40/80 modules | 0.36 s / 1.45 s / 5.89 s / 23.3 s / 95.4 s — **super-linear** |
-| Parse cost (historical, Python) | same | 4.0 / 6.6 / 12.9 / 26.8 / 52.9 ms — linear |
-
-**Parsing scales linearly while layout is quadratic.** Routing each edge tests candidate routes
-against every other node, so an 80-module project spends 95 seconds on layout and 53 milliseconds on
-parsing. This is stated as a characteristic, not hidden as a rounding error.
+Current test and verification figures (test counts, idempotence, schema, golden reproduction,
+performance characteristics) are in [`docs/verification.md`](docs/verification.md).
 
 ## Known limitations (listed honestly)
 

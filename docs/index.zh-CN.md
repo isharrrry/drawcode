@@ -30,6 +30,7 @@
 | 新增一门源语言（Rust、Go……） | [架构](architecture.zh-CN.md#模块分层) → [参与贡献](contributing.zh-CN.md) |
 | 自己实现完整能力 | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 | 了解一致性测试比较什么 | [`conformance.md`](conformance.md) |
+| 看跑出来的测试与验证数字 | [`verification.md`](verification.md) |
 | 让编译产物变得可读 | [元数据模板](templates.md) |
 | 在 VS Code 里浏览程序集 | [VS Code 扩展](vscode-extension.md) |
 | 跑一下仓库自带的示例工程 | [示例](examples.md) |

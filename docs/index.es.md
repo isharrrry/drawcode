@@ -28,6 +28,7 @@ a la versión inglesa.
 | Añadir un lenguaje fuente nuevo (Rust, Go, …) | [Arquitectura](architecture.es.md#capas-de-módulos) → [Contribuir](contributing.es.md) |
 | Implementar tú mismo toda la capacidad | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 | Saber qué compara la suite de conformidad | [`conformance.md`](conformance.md) |
+| Ver las cifras medidas de prueba y verificación | [`verification.md`](verification.md) |
 | Diagnosticar un diagrama que perdió su disposición | [Formato `.drawio`](drawio-format.es.md#almacenamiento-comprimido) |
 | Renderizar un `.drawio` a imagen sin tener draw.io instalado | [Contributing § Offline rendering](contributing.md#offline-rendering) |
 
