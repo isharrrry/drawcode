@@ -2,11 +2,24 @@
   "name": "drawcode-artifact-viewer",
   "displayName": "Drawcode Artifact Viewer",
   "description": "在 VS Code 中浏览 .dll / .so / .out / .a / .o 的模块、信号、函数与数据流",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "publisher": "drawcode",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/the50w/drawcode.git",
+    "directory": "editors/vscode"
+  },
+  "icon": "media/icon.png",
+  "files": [
+    "dist/*.js",
+    "dist/core/**",
+    "dist/tree/*.js",
+    "media/**"
+  ],
   "private": true,
   "engines": {
+    "node": ">=22.18",
     "vscode": "^1.90.0"
   },
   "categories": [

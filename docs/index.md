@@ -20,6 +20,7 @@ version.
 | **Examples** | [English](examples.md) *(no translation yet)* | The `small/`, `medium/` and `plain/` sample projects, the committed draw.io export used as a rejection fixture, and how to run each |
 | **Templates** | [中文](templates.md) *(no English yet)* | The minimum addition that makes a compiled artifact readable: `DrawcodeMeta.h/.c` for C (ELF) and `DrawcodeAttributes.cs` for C# |
 | **VS Code extension** | [中文](vscode-extension.md) *(no English yet)* | Drawcode Artifact Viewer: browsing assemblies read-only, the three views, the artifact tree, export, and settings |
+| **Versioning** | [English](versioning.md) · [中文](versioning.zh-CN.md) | The single version number shared by the core and the extension, the files that carry it, and the `npm run bump` script |
 | **Contributing** | [English](contributing.md) · [中文](contributing.zh-CN.md) · [Español](contributing.es.md) | Environment, running tests, adding golden cases, adding a source language, and what is deliberately unverified |
 
 ## Where to start

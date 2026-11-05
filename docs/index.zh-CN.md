@@ -19,6 +19,7 @@
 | **示例** | [English](examples.md)（暂无中文版） | `small/`、`medium/`、`plain/` 三个示例工程、用作拒绝样本的 draw.io 导出件，以及各自的跑法 |
 | **元数据模板** | [中文](templates.md)（暂无英文版） | 让编译产物可解析的最小附加物：C（ELF）的 `DrawcodeMeta.h/.c` 与 C# 的 `DrawcodeAttributes.cs` |
 | **VS Code 扩展** | [中文](vscode-extension.md)（暂无英文版） | Drawcode Artifact Viewer：只读浏览程序集、三个视图、程序集树、导出与设置 |
+| **版本策略** | [English](versioning.md) · [中文](versioning.zh-CN.md) | 核心与扩展共用的单一版本号、携带版本号的文件，以及 `npm run bump` 脚本 |
 | **参与贡献** | [English](contributing.md) · [中文](contributing.zh-CN.md) · [Español](contributing.es.md) | 环境、跑测试、加金标准用例、加一门源语言，以及刻意未验证的事项 |
 
 ## 从哪里开始

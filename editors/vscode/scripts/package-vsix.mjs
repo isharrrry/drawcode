@@ -80,6 +80,12 @@ for (const relative of REQUIRED) {
   }
 }
 
+// icon 是 Marketplace 列表页唯一的视觉标识。声明了却不存在时，让打包失败而不是
+// 生成一个 manifest 指向空路径的 VSIX。
+if (pkg.icon && !fs.existsSync(path.join(ROOT, pkg.icon))) {
+  fail(`缺少图标：${pkg.icon}`);
+}
+
 /** 递归复制，filter 收到相对源目录的 POSIX 路径。 */
 function copyDir(from, to, filter = () => true) {
   fs.mkdirSync(to, { recursive: true });
@@ -165,6 +171,11 @@ try {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;");
 
+  // Marketplace 的图标不是随包附带就够了，必须在 vsixmanifest 里声明成 Assets；
+  // 未配置 icon 时不生成该行，保持旧包结构不变。
+  const iconAsset = pkg.icon
+    ? `\n    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${escapeXml(pkg.icon)}" Addressable="true" />`
+    : "";
   const manifest = `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
@@ -185,7 +196,7 @@ try {
   <Dependencies />
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
-    <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />
+    <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />${iconAsset}
   </Assets>
 </PackageManifest>
 `;

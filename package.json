@@ -1,0 +1,21 @@
+{
+  "name": "drawcode-workspace",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Repository entry point: install and test the core library and the VS Code extension with one command.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "postinstall": "npm install --prefix typescript --no-audit --no-fund && npm install --prefix editors/vscode --no-audit --no-fund",
+    "test": "npm test --prefix typescript && npm test --prefix editors/vscode",
+    "test:core": "npm test --prefix typescript",
+    "test:extension": "npm test --prefix editors/vscode",
+    "typecheck": "npm run typecheck --prefix typescript && npm run typecheck --prefix editors/vscode",
+    "build": "npm run build --prefix editors/vscode",
+    "package": "npm run package --prefix editors/vscode",
+    "bump": "node scripts/bump-version.mjs",
+    "version:check": "node scripts/bump-version.mjs --check"
+  }
+}
