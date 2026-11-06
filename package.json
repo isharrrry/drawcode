@@ -1,6 +1,6 @@
 {
   "name": "drawcode-workspace",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Repository entry point: install and test the core library and the VS Code extension with one command.",
   "license": "MIT",

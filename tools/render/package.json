@@ -9,6 +9,7 @@
     "png": "node render_png.js"
   },
   "license": "MIT",
+  "author": "None",
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "jsdom": "^30.1.2",

@@ -24,7 +24,7 @@ import * as vscode from "vscode";
 import type { DrawcodeApi } from "../../extension";
 
 const VIEW_TYPE = "drawcode.artifact";
-const EXTENSION_ID = "drawcode.drawcode-artifact-viewer";
+const EXTENSION_ID = "harrrry.drawcode-artifact-viewer";
 const ARTIFACT_RELATIVE = "../../templates/c/example/app.o";
 
 /** 示例程序集 `app.o` 的期望值；与模板示例源码一一对应，改示例时同步改这里。 */

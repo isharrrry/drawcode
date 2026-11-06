@@ -1,5 +1,10 @@
 /**
- * 打包 VSIX：扩展代码 + 解析核心 + .NET sidecar，一个文件装完即用。
+ * 打包 VSIX：扩展代码 + 解析核心 + 框架依赖的 .NET sidecar。
+ *
+ * 发布策略是「不携带、不裁剪 .NET 运行时」：sidecar 只发
+ * `dll + deps.json + runtimeconfig.json`，目标机必须有 .NET 10+ 运行时。
+ * 这样一份通用 VSIX 可以同时装在 Windows 与 Linux 上；缺少运行时时扩展会给出
+ * 安装指引（见 `typescript/src/artifact/dotnet.ts`），而不是空白页。
  *
  * 为什么自己写而不用 `vsce package`：
  *   - 本机没有 vsce 依赖，安装它只为打一个包不划算；
@@ -39,6 +44,19 @@ const REQUIRED = [
  * VSIX 规范要求它叫 `extension/README.md`，所以复制时改名；文档本身住在 docs/。
  */
 const README_SOURCE = path.join(REPO, "docs", "vscode-extension.md");
+
+/**
+ * MIT 要求许可与版权声明随所有副本分发，而 `vsce` 会自带仓库根的 LICENSE。
+ * 这里是自写打包器，不补这一步安装后的扩展目录里就只有 `license: MIT` 字段、
+ * 没有正文，等于许可声明不完整。
+ */
+const LICENSE_SOURCE = path.join(REPO, "LICENSE");
+
+/**
+ * 市场页的 Changelog 标签只读包内的 `extension/CHANGELOG.md`。
+ * 仓库根的同名文件是唯一来源，打包时复制，不在这里维护第二份。
+ */
+const CHANGELOG_SOURCE = path.join(REPO, "CHANGELOG.md");
 
 /**
  * 把 docs 页面变成 VSIX 里的说明页。只做三处删除，不做渲染：
@@ -113,6 +131,11 @@ try {
   copyDir(path.join(ROOT, "media"), path.join(extensionDir, "media"));
   fs.copyFileSync(path.join(ROOT, "package.json"), path.join(extensionDir, "package.json"));
   fs.writeFileSync(path.join(extensionDir, "README.md"), readmeForVsix());
+  if (!fs.existsSync(LICENSE_SOURCE)) fail(`缺少许可证文件：${LICENSE_SOURCE}`);
+  fs.copyFileSync(LICENSE_SOURCE, path.join(extensionDir, "LICENSE"));
+  if (fs.existsSync(CHANGELOG_SOURCE)) {
+    fs.copyFileSync(CHANGELOG_SOURCE, path.join(extensionDir, "CHANGELOG.md"));
+  }
 
   // ── 2. sidecar：每次现发布，避免包进上一次的旧 dll ────────────────────
   const sidecarProject = path.join(REPO, "tools", "drawcode-metadata", "DrawcodeMetadata.csproj");
@@ -121,7 +144,22 @@ try {
   console.log("publish sidecar ->", sidecarOut);
   execFileSync(
     "dotnet",
-    ["publish", sidecarProject, "-c", "Release", "-o", sidecarOut, "--nologo", "-v", "quiet"],
+    [
+      "publish",
+      sidecarProject,
+      "-c",
+      "Release",
+      "-o",
+      sidecarOut,
+      // 显式关掉自包含与裁剪：机器上可能残留全局 SelfContained / PublishTrimmed，
+      // 不能让 VSIX 悄悄变成「带运行时」或「被裁剪」的包。发布策略固定为框架依赖。
+      "--self-contained",
+      "false",
+      "-p:PublishTrimmed=false",
+      "--nologo",
+      "-v",
+      "quiet",
+    ],
     { stdio: "inherit" },
   );
 
@@ -145,6 +183,20 @@ try {
     if (!fs.existsSync(source)) fail(`sidecar 发布产物缺少 ${name}`);
     fs.copyFileSync(source, path.join(sidecarTarget, name));
   }
+
+  // 守卫发布形态：VSIX 绝不能携带 .NET 运行时（用户明确要求不包含、不裁剪）。
+  // runtimeconfig 里出现 includedFrameworks 就说明是自包含发布；缺 framework
+  // 则说明发布参数被全局属性改写了。两者都必须让打包失败，而不是悄悄进包。
+  const runtimeConfigPath = path.join(sidecarOut, "drawcode-metadata.runtimeconfig.json");
+  const runtimeConfig = JSON.parse(fs.readFileSync(runtimeConfigPath, "utf8"));
+  const runtimeOptions = runtimeConfig.runtimeOptions ?? {};
+  if (runtimeOptions.includedFrameworks !== undefined) {
+    fail("sidecar 是自包含发布（runtimeconfig.includedFrameworks 存在）；VSIX 不允许携带运行时");
+  }
+  if (runtimeOptions.framework === undefined) {
+    fail("sidecar 不是框架依赖发布（runtimeconfig 缺少 framework）");
+  }
+
   // publish 的原始输出在 stage 根下；不回删的话 zip 里会多出一份 `sidecar/`
   // （含用不到的 .exe 与 .pdb），等于把同一个 dll 打包两遍。
   fs.rmSync(sidecarOut, { recursive: true, force: true });
@@ -176,19 +228,58 @@ try {
   const iconAsset = pkg.icon
     ? `\n    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/${escapeXml(pkg.icon)}" Addressable="true" />`
     : "";
+  const iconElement = pkg.icon ? `\n    <Icon>extension/${escapeXml(pkg.icon)}</Icon>` : "";
+
+  // 许可证同理：正文随包复制还不够，市场页的「License」链接读的是 License Asset。
+  const licenseAsset =
+    '\n    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE" Addressable="true" />';
+
+  // 分类与标签只从 manifest 读（package.json 的同名字段不会自动带进去），
+  // 缺这两行时市场页的分类与标签区域就是空的。
+  const listElement = (tag, value) =>
+    Array.isArray(value) && value.length > 0
+      ? `\n    <${tag}>${escapeXml(value.join(","))}</${tag}>`
+      : "";
+  const tagsElement = listElement("Tags", pkg.keywords);
+  const categoriesElement = listElement("Categories", pkg.categories);
+
+  // 仓库与问题页链接属于展示型元数据：字段缺失时整行不生成，避免写出空 href。
+  const repositoryUrl =
+    typeof pkg.repository === "string" ? pkg.repository : pkg.repository?.url;
+  const linkProperties = [
+    ["Microsoft.VisualStudio.Services.Links.Source", repositoryUrl],
+    ["Microsoft.VisualStudio.Services.Links.Getstarted", repositoryUrl],
+    ["Microsoft.VisualStudio.Services.Links.GitHub", repositoryUrl],
+    ["Microsoft.VisualStudio.Services.Links.Support", pkg.bugs?.url],
+    ["Microsoft.VisualStudio.Services.Links.Learn", pkg.homepage],
+  ]
+    .filter(([, value]) => typeof value === "string" && value.length > 0)
+    .map(([id, value]) => `\n      <Property Id="${id}" Value="${escapeXml(value)}" />`)
+    .join("");
+
+  // Changelog 同样是「随包附带不够，必须声明」：未声明时市场页的该标签为空白。
+  const changelogAsset = fs.existsSync(CHANGELOG_SOURCE)
+    ? `\n    <Asset Type="Microsoft.VisualStudio.Services.Content.Changelog" Path="extension/CHANGELOG.md" Addressable="true" />`
+    : "";
+
   const manifest = `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
     <Identity Language="en-US" Id="${escapeXml(pkg.name)}" Version="${escapeXml(pkg.version)}" Publisher="${escapeXml(pkg.publisher)}" />
     <DisplayName>${escapeXml(pkg.displayName)}</DisplayName>
-    <Description xml:space="preserve">${escapeXml(pkg.description)}</Description>
+    <Description xml:space="preserve">${escapeXml(pkg.description)}</Description>${tagsElement}${categoriesElement}
+    <GalleryFlags>Public</GalleryFlags>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="${escapeXml(pkg.engines.vscode)}" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value="" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
       <Property Id="Microsoft.VisualStudio.Code.LocalizedLanguages" Value="" />
+      <Property Id="Microsoft.VisualStudio.Code.ExecutesCode" Value="true" />
+      <Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
+      <Property Id="Microsoft.VisualStudio.Services.Content.Pricing" Value="Free" />${linkProperties}
     </Properties>
+    <License>extension/LICENSE</License>${iconElement}
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Code" />
@@ -196,7 +287,7 @@ try {
   <Dependencies />
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
-    <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />${iconAsset}
+    <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true" />${changelogAsset}${licenseAsset}${iconAsset}
   </Assets>
 </PackageManifest>
 `;

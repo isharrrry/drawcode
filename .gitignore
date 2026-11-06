@@ -69,3 +69,6 @@ desktop.ini
 # VS Code 扩展测试用的临时用户数据与日志
 .vscode-test/
 *.vsix
+
+# AI 会话产物（临时分析结果，不入库）
+/claude-result.json

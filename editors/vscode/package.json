@@ -1,14 +1,19 @@
 {
   "name": "drawcode-artifact-viewer",
   "displayName": "Drawcode Artifact Viewer",
-  "description": "在 VS Code 中浏览 .dll / .so / .out / .a / .o 的模块、信号、函数与数据流",
-  "version": "0.4.0",
-  "publisher": "drawcode",
+  "description": "Inspect .dll / .so / .out / .a / .o modules, signals, functions and data flow inside VS Code",
+  "version": "0.4.1",
+  "publisher": "harrrry",
   "license": "MIT",
+  "author": "None",
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/the50w/drawcode.git",
+    "url": "https://github.com/isharrrry/drawcode.git",
     "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/isharrrry/drawcode#readme",
+  "bugs": {
+    "url": "https://github.com/isharrrry/drawcode/issues"
   },
   "icon": "media/icon.png",
   "files": [
@@ -25,6 +30,21 @@
   "categories": [
     "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "dll",
+    "so",
+    "elf",
+    "pe",
+    "artifact",
+    "drawio",
+    "diagram",
+    "call graph",
+    "signal",
+    "reverse engineering"
+  ],
+  "extensionKind": [
+    "workspace"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -216,6 +236,11 @@
           "type": "number",
           "default": 2000,
           "description": "信号 + 函数超过该数量时启用模型切片（模块展开时按需下发）。0 表示总是切片，-1 表示强制整份下发。"
+        },
+        "drawcode.dotnetPath": {
+          "type": "string",
+          "default": "",
+          "description": "解析 .dll 时使用的 dotnet 可执行文件路径。留空时依次查找 PATH、DRAWCODE_DOTNET、DOTNET_ROOT 与 Windows/Linux 常见安装目录。"
         }
       }
     }
