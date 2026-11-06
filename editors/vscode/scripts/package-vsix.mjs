@@ -49,6 +49,10 @@ const README_SOURCE = path.join(REPO, "docs", "vscode-extension.md");
  * MIT 要求许可与版权声明随所有副本分发，而 `vsce` 会自带仓库根的 LICENSE。
  * 这里是自写打包器，不补这一步安装后的扩展目录里就只有 `license: MIT` 字段、
  * 没有正文，等于许可声明不完整。
+ *
+ * 包内必须叫 `LICENSE.txt`，不是 `LICENSE`：VSIX 是 OPC 包，每个 part 都要能匹配
+ * `[Content_Types].xml` 里的 Default 扩展名规则；无扩展名的文件匹配不到任何规则，
+ * Marketplace 会认为「manifest 声明了但包里没有」而拒绝上传。`vsce` 同样打成 .txt。
  */
 const LICENSE_SOURCE = path.join(REPO, "LICENSE");
 
@@ -132,7 +136,7 @@ try {
   fs.copyFileSync(path.join(ROOT, "package.json"), path.join(extensionDir, "package.json"));
   fs.writeFileSync(path.join(extensionDir, "README.md"), readmeForVsix());
   if (!fs.existsSync(LICENSE_SOURCE)) fail(`缺少许可证文件：${LICENSE_SOURCE}`);
-  fs.copyFileSync(LICENSE_SOURCE, path.join(extensionDir, "LICENSE"));
+  fs.copyFileSync(LICENSE_SOURCE, path.join(extensionDir, "LICENSE.txt"));
   if (fs.existsSync(CHANGELOG_SOURCE)) {
     fs.copyFileSync(CHANGELOG_SOURCE, path.join(extensionDir, "CHANGELOG.md"));
   }
@@ -214,6 +218,7 @@ try {
   <Default Extension=".vsixmanifest" ContentType="text/xml" />
   <Default Extension=".dll" ContentType="application/octet-stream" />
   <Default Extension=".exe" ContentType="application/octet-stream" />
+  <Default Extension=".txt" ContentType="text/plain" />
 </Types>
 `;
   const escapeXml = (value) =>
@@ -232,7 +237,7 @@ try {
 
   // 许可证同理：正文随包复制还不够，市场页的「License」链接读的是 License Asset。
   const licenseAsset =
-    '\n    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE" Addressable="true" />';
+    '\n    <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE.txt" Addressable="true" />';
 
   // 分类与标签只从 manifest 读（package.json 的同名字段不会自动带进去），
   // 缺这两行时市场页的分类与标签区域就是空的。
@@ -279,7 +284,7 @@ try {
       <Property Id="Microsoft.VisualStudio.Services.GitHubFlavoredMarkdown" Value="true" />
       <Property Id="Microsoft.VisualStudio.Services.Content.Pricing" Value="Free" />${linkProperties}
     </Properties>
-    <License>extension/LICENSE</License>${iconElement}
+    <License>extension/LICENSE.txt</License>${iconElement}
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Code" />
