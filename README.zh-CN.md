@@ -146,12 +146,18 @@ node typescript/bin/drawcode.ts inspect bin/Release/net9.0/YourProject.dll --out
 
 ### 路径 B：在 VS Code 里浏览程序集
 
-扩展目前**从仓库打包安装**，尚未发布到扩展市场。
+可以从 [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harrrry.drawcode-artifact-viewer) 安装：
+
+```bash
+code --install-extension harrrry.drawcode-artifact-viewer
+```
+
+也可以自行从仓库打包：
 
 ```bash
 cd editors/vscode
 npm install
-npm run package     # 产出 out/drawcode-artifact-viewer-0.4.0.vsix
+npm run package     # 产出 out/drawcode-artifact-viewer-0.4.1.vsix
 ```
 
 然后在 VS Code 里执行「扩展: 从 VSIX 安装…」，选中那个文件。装好后双击任一

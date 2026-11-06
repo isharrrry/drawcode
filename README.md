@@ -172,13 +172,18 @@ an artifact, common pitfalls): [`docs/agent-prompts.md`](docs/agent-prompts.md) 
 
 ### Path B: browse an artifact in VS Code
 
-The extension is currently **installed from a VSIX built in the repository**; it is not published
-to the marketplace yet.
+Install it from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harrrry.drawcode-artifact-viewer):
+
+```bash
+code --install-extension harrrry.drawcode-artifact-viewer
+```
+
+Or build the VSIX yourself:
 
 ```bash
 cd editors/vscode
 npm install
-npm run package     # produces out/drawcode-artifact-viewer-0.4.0.vsix
+npm run package     # produces out/drawcode-artifact-viewer-0.4.1.vsix
 ```
 
 Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Double-click any

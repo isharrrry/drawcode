@@ -176,13 +176,18 @@ pedir a un agente que explique un artefacto, trampas habituales):
 
 ### Camino B: explorar un artefacto en VS Code
 
-La extensión se instala actualmente **desde un VSIX construido en el repositorio**; todavía no está
-publicada en el marketplace.
+Instálala desde el [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=harrrry.drawcode-artifact-viewer):
+
+```bash
+code --install-extension harrrry.drawcode-artifact-viewer
+```
+
+O construye el VSIX tú mismo:
 
 ```bash
 cd editors/vscode
 npm install
-npm run package     # genera out/drawcode-artifact-viewer-0.4.0.vsix
+npm run package     # genera out/drawcode-artifact-viewer-0.4.1.vsix
 ```
 
 Luego ejecuta «Extensiones: Instalar desde VSIX…» en VS Code y elige ese fichero. Haz doble clic en
