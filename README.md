@@ -6,8 +6,11 @@
 > which data is persistent. Browse assemblies in VS Code, or draw annotated sources as editable
 > [draw.io](https://www.drawio.com/) diagrams.
 
-Runs on Windows, Linux and macOS. The CLI has no third-party runtime dependencies: Node 22.6+.
-A .NET 10 runtime is needed only to read PE/CLI `.dll` artifacts through the bundled sidecar.
+Runs on Windows, Linux and macOS. The CLI has no third-party runtime dependencies: Node 22.18+.
+A .NET 10+ runtime is needed only to read PE/CLI `.dll` artifacts through the bundled sidecar;
+the runtime itself is neither bundled nor trimmed. If it is missing, the extension and `inspect`
+show an actionable install prompt instead of failing silently, and the same VSIX works on
+Windows and Linux.
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -18,7 +21,7 @@ separate modelling project — just one layer of declarations inside the code.
 
 | Capability | What it does | Entry point |
 | :--- | :--- | :--- |
-| **Assembly browsing** (the main line) | Open a `.dll` / `.so` / `.out` / `.a` / `.o` and read its overview, module cross-links, signal data and persistence definitions; several artifacts can be organised into an assembly tree with groups and aliases | VS Code extension |
+| **Assembly browsing** (the main line) | Open a `.dll` / `.so` / `.out` / `.a` / `.o` and read its overview, module cross-links, signal data and persistence definitions; several artifacts can be organised into an assembly tree with groups and aliases; checked modules/signals export to Drawio, Mermaid (.mmd) and Markdown (.md) | VS Code extension |
 | **Metadata templates** | Copy one header or attribute file, put cross-link direction, signal semantics and persistence markers into the declaration layer — that is what makes an artifact readable at all | [`docs/templates.md`](docs/templates.md) |
 | **Source to diagram** | A source file or a whole directory → `.drawio`; right-click in the explorer to generate in place, useful when you only want one local group of modules | Extension context menu / `build` |
 | **Artifact JSON** | Read structure back out of an artifact as canonical JSON, to post-process or feed your own tools | `inspect` |
@@ -175,7 +178,7 @@ to the marketplace yet.
 ```bash
 cd editors/vscode
 npm install
-npm run package     # produces out/drawcode-artifact-viewer-0.2.0.vsix
+npm run package     # produces out/drawcode-artifact-viewer-0.4.0.vsix
 ```
 
 Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Double-click any
@@ -184,8 +187,9 @@ Then run "Extensions: Install from VSIX…" in VS Code and pick that file. Doubl
 To hack on it: `npm install && npm run build`, then press `F5` to launch the Extension Development
 Host.
 
-Prerequisites: VS Code >= 1.90; `.dll` needs the .NET 10 runtime (the sidecar ships inside the
-VSIX), ELF and `ar` do not. Details in [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+Prerequisites: VS Code >= 1.90; `.dll` needs the .NET 10+ runtime (the sidecar ships inside the
+VSIX, the runtime itself does not), ELF and `ar` do not. Missing runtimes get an install prompt
+instead of an empty view. Details in [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
 
 ### Path C: source → drawio
 
@@ -193,7 +197,7 @@ VSIX), ELF and `ar` do not. Details in [`docs/vscode-extension.md`](docs/vscode-
 source file or folder in the explorer and pick "Generate Drawio diagram"; the `.drawio` appears
 in place.
 
-**Or use the CLI** (Node 22.6+, no third-party runtime dependencies):
+**Or use the CLI** (Node 22.18+, no third-party runtime dependencies):
 
 ```bash
 git clone <this-repo> && cd drawcode
@@ -326,6 +330,8 @@ the difference is the list that needs reconciling.
 
 | To learn about | Read |
 | :--- | :--- |
+| **What the product promises, and what to update when you change it** | **[Requirements and acceptance criteria](docs/requirements.md)** — the authoritative requirement contract: every capability, its acceptance criteria, and the change protocol every other document follows |
+| **How a change is judged good enough, and the gate it must pass** | **[Test and quality constraints](docs/test-and-quality.md)** — quality objectives, what each test level can and cannot see, which evidence is accepted, entry and exit criteria, recorded measurements, defect grading |
 | Why the design is shaped this way | [`docs/architecture.md`](docs/architecture.md) |
 | Every annotation key, with types and defaults | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` mapping, routing rules, coordinate semantics | [`docs/drawio-format.md`](docs/drawio-format.md) |
@@ -339,6 +345,27 @@ the difference is the list that needs reconciling.
 | Building, testing, adding a language | [`docs/contributing.md`](docs/contributing.md) |
 | Adding the next code-language adapter | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
+## Maintaining this repository
+
+[`docs/requirements.md`](docs/requirements.md) is the single authoritative source for what the
+product promises and how each promise is judged. Every other document explains how a promise is
+kept; where one of them disagrees with it, that one is wrong.
+
+A behaviour change is not complete until its follow-up is done. The table below is the contract:
+
+| If you change | You must also update | Because |
+| :--- | :--- | :--- |
+| Any user-visible behaviour | The matching REQ and AC in [Requirements](docs/requirements.md) | The requirement *is* the promise; a behaviour that ships without one is undocumented and therefore not agreed |
+| Source ingestion, annotation semantics, or edge derivation | [Architecture](docs/architecture.md), [Annotations](docs/annotations.md), [`.drawio` format](docs/drawio-format.md), and the model-level expected outputs | The parser, the vocabulary and the geometry form one contract; updating one without the others leaves the suite green and the documentation false |
+| Default layout, routing, or any emitted geometry | [`.drawio` format](docs/drawio-format.md) and the geometry expected outputs | Hand-made arrangements and recorded layouts are pinned to that geometry, so a silent change breaks every diagram already in use |
+| An annotation key or its semantics | [Annotations](docs/annotations.md) and [Templates](docs/templates.md) | A key is defined once and consumed twice; a divergence between the definition and the template is silent data loss |
+| An artifact-reading decision or an emitted field | [Artifact format](docs/artifact-format.md) and the artifact test expectations | That JSON is consumed by the editor and by users' own tooling; it is a public contract |
+| Any test, gate step, or measured figure | [Test and quality](docs/test-and-quality.md) **and** [Verification](docs/verification.md) | The gate is a contract and the numbers are a record. Both are stated in two places, so both have to move, or one becomes a stale claim the next reader trusts |
+| Any document at all | Its counterpart in the other language, in the same change | A behaviour documented in one language only is a defect, not a translation lag |
+
+The topic tables in this file and in [`docs/index.md`](docs/index.md) count as documents too: a topic
+added to one and not the other is a page nobody finds.
+
 ## Development
 
 ```bash
@@ -347,7 +374,7 @@ cd editors/vscode && node --test test/*.test.mjs   # extension host-free tests
 ```
 
 The PE sidecar under `tools/drawcode-metadata/` is plain .NET 10 and is only built/run when
-`inspect` reads a `.dll`; the rest of the toolchain needs nothing but Node 22.6+.
+`inspect` reads a `.dll`; the rest of the toolchain needs nothing but Node 22.18+.
 
 Current test and verification figures (test counts, idempotence, schema, golden reproduction,
 performance characteristics) are in [`docs/verification.md`](docs/verification.md).

@@ -160,7 +160,9 @@ readable but carries no metadata; only usage errors and I/O failures exit `2`.
 | Code | Severity | Meaning |
 | :--- | :--- | :--- |
 | `unknown-format` | error | Magic bytes match neither ar, PE nor ELF |
-| `tool-unavailable` | warning | The sidecar is missing, `dotnet` is unavailable, or it timed out |
+| `tool-unavailable` | warning | The sidecar is missing, timed out, or failed for a non-runtime reason |
+| `dotnet-missing` | warning | No `dotnet` executable was found on PATH, `DOTNET_ROOT`, or the platform's known install locations |
+| `dotnet-runtime-missing` | warning | `dotnet` exists but no compatible .NET 10+ runtime is installed |
 | `unsupported-native-pe` | warning | PE without CLI metadata (NativeAOT / ReadyToRun) |
 | `no-metadata` | warning | Recognized container, but no drawcode metadata (ELF without `dc_meta_entries`, archive with no instrumented member) |
 | `version-mismatch` | error | Template version is not supported by this reader |
@@ -187,14 +189,26 @@ stdout with no extra text, so it can be piped into `jq` or diffed directly.
 ## Dependency and packaging
 
 The PE reader is a .NET 10 sidecar built from `tools/drawcode-metadata`; the TypeScript side
-only locates it, runs it with `execFile`, and parses stdout. The sidecar writes UTF-8 bytes
-explicitly — a Windows console using GBK would otherwise turn Chinese symbol names into
-U+FFFD while every count still looked correct.
+only locates it, runs it with `execFile`, and parses stdout. The sidecar is an IL-only
+framework-dependent assembly, so the same file is invoked as `dotnet drawcode-metadata.dll`
+on both Windows and Linux. It writes UTF-8 bytes explicitly — a Windows console using GBK
+would otherwise turn Chinese symbol names into U+FFFD while every count still looked correct.
 
 - Development: `node tools/publish-metadata-tool.mjs` (framework-dependent, needs .NET 10).
-- Release: the bundled VSIX ships the same framework-dependent build, so the machine needs the
-  .NET 10 runtime. `--self-contained --runtime <rid>` remains available for machines that cannot
-  install .NET; it produces a larger per-platform package with the runtime included.
+- Release: the bundled VSIX ships the same framework-dependent build **without** the runtime and
+  without trimming, so one package works on Windows and Linux. The machine needs .NET 10 or a
+  newer major version (`RollForward=LatestMajor`). The packaging script rejects a self-contained
+  publish, so a runtime can never slip into the VSIX.
+- Missing runtime: the reader emits `dotnet-missing` or `dotnet-runtime-missing` with
+  platform-specific install commands instead of failing silently. The VS Code extension turns
+  these diagnostics into a page-level prompt; `inspect` also prints them to stderr while keeping
+  stdout pure JSON.
+- Locating `dotnet`: the extension setting `drawcode.dotnetPath` or the `DRAWCODE_DOTNET`
+  environment variable wins; otherwise the reader tries `PATH`, `DOTNET_HOST_PATH`, `DOTNET_ROOT`,
+  and the platform's common install directories (`%ProgramFiles%\dotnet`, `/usr/share/dotnet`,
+  `/usr/lib/dotnet`, `/snap/bin`, `~/.dotnet`, …).
+- `--self-contained --runtime <rid>` remains available in the publish helper for offline or
+  special deployments, but it is not used for the VSIX release path.
 
 ## Boundaries
 

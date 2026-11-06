@@ -18,12 +18,14 @@ status: stable
 
 | 工具链 | 版本要求 | 用途 |
 | :--- | :--- | :--- |
-| Node | 22.6 或更高 | 实现、测试、`tools/render/` |
+| Node | 22.18 或更高 | 实现、测试、`tools/render/` |
 | .NET SDK / 运行时 | 10 | 仅 PE 元数据 sidecar（`tools/drawcode-metadata`） |
 
 解析、布局、路由与 XML 写出只用 Node 标准库。`npm run typecheck` 需要 `typescript` 这个
 devDependency，但它不在测试路径上。PE sidecar 是独立的 net10.0 工程：没有 .NET 10 时，
-`.dll` 的 `inspect` 会报 `tool-unavailable`，ELF/ar 读取仍在进程内完成。
+`.dll` 的 `inspect` 会报 `dotnet-missing`（有 dotnet 但没有兼容运行时则报
+`dotnet-runtime-missing`），ELF/ar 读取仍在进程内完成。VS Code 扩展会把同样的诊断
+升级成页面里的安装指引。
 
 ## 仓库地图
 
@@ -47,8 +49,8 @@ devDependency，但它不在测试路径上。PE sidecar 是独立的 net10.0 �
 ## 跑测试
 
 ```bash
-cd typescript && node --test                              # 211 条，3 条跳过
-cd editors/vscode && node --test test/*.test.mjs          # 79 条
+cd typescript && node --test                              # 229 条，5 条跳过
+cd editors/vscode && node --test test/*.test.mjs          # 93 条
 ```
 
 失败会按层报出来——解析、IR/边、`.drawio` 读写、代码生成、Schema、SVG、conformance——与
@@ -132,7 +134,7 @@ node typescript/bin/drawcode.ts dump-ir \
 
 | 未验证 | 原因与影响 |
 | :--- | :--- |
-| **PE 产物需要 .NET 10。** | sidecar 是独立 net10.0 工程；没有它，`.dll` 的 `inspect` 报 `tool-unavailable`，ELF/ar 读取不受影响。 |
+| **PE 产物需要 .NET 10。** | sidecar 是独立 net10.0 工程；没有它，`.dll` 的 `inspect` 报 `dotnet-missing` / `dotnet-runtime-missing` 并给出安装指引，ELF/ar 读取不受影响。 |
 | **产物模型不在源码金标准内。** | `inspect` 有自己的测试（`artifact.test.ts`、`artifact-elf.test.ts`）；L1–L3 只覆盖源码管线。 |
 | **离线渲染器画不出 `jumpStyle=arc`。** | `jumpStyle` 是 draw.io 扩展，mxGraph 核心没有；生成文件配置正确，但要在 draw.io 里看跳线。 |
 | **离线渲染器的中文宽度是估算的。** | jsdom 的 `offsetWidth = 0`，字宽只能近似，标签避让可能不准。 |

@@ -18,15 +18,15 @@ status: stable
 
 | 主张 | 如何测量 | 结果 |
 | :--- | :--- | :--- |
-| TypeScript 实现是正确的 | `cd typescript && node --test` | **211 个测试，0 失败，3 跳过** |
-| 扩展测试 | `cd editors/vscode && node --test test/*.test.mjs` | **79 个测试，0 失败** |
+| TypeScript 实现是正确的 | `cd typescript && node --test` | **229 个测试，0 失败，5 跳过** |
+| 扩展测试 | `cd editors/vscode && node --test test/*.test.mjs` | **93 个测试，0 失败** |
 | 压缩态 `.drawio` 被正确读取 | 读回一个 draw.io 压缩过的金标准文件 | **nodes=6, edges=6, attrs=6** —— 与纯文本形态完全相同 |
 | 读不出的载荷不会静默失败 | `read_layout('<mxfile><diagram>not-a-payload</diagram></mxfile>')` | 抛错（绝不返回空布局） |
 | 生成的 `.drawio` 符合 schema | 对着 `tools/xsd/mxfile.xsd` 做 XSD 校验 | **3/3 通过**（C、C#，以及一张带拐点的图） |
 | 往返幂等 | 构建 → sync → 构建，比较 | **第二次 sync 零改动** |
 | 金标准 IR 被精确复现 | `dump-ir` 与 `tools/golden/*/expected.ir.json` 逐字节比对 | **两个金标准用例均完全一致** |
 
-那 3 个跳过的测试不是失败，也不是被禁用：它们依赖仓库外的东西（`DRAWCODE_SAMPLE_DLL`
+那 5 个跳过的测试不是失败，也不是被禁用：它们依赖仓库外的东西（`DRAWCODE_SAMPLE_DLL`
 指向的样本 DLL，以及 `templates/c/example` 是否已编译），拿不到时按设计 skip 并打印原因。
 
 ## 性能特征

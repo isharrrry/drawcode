@@ -5,8 +5,10 @@
 > 让编译产物讲清系统骨架：模块怎么交联、信号怎么流转、哪些数据要持久化。
 > 在 VS Code 里浏览程序集，或把源码画成可编辑的 [draw.io](https://www.drawio.com/) 图。
 
-可在 Windows、Linux 与 macOS 上运行。CLI 没有第三方运行时依赖：需要 Node 22.6+。
-只有在 `inspect` 读取 PE/CLI `.dll` 时才需要 .NET 10 运行时，由随附的 sidecar 承担。
+可在 Windows、Linux 与 macOS 上运行。CLI 没有第三方运行时依赖：需要 Node 22.18+。
+只有在 `inspect` 读取 PE/CLI `.dll` 时才需要 .NET 10+ 运行时，由随附的 sidecar 承担；
+扩展不携带、也不裁剪运行时。未安装时插件与 `inspect` 会给出安装指引而不是静默失败，
+同一份 VSIX 在 Windows 与 Linux 上通用。
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -16,7 +18,7 @@ drawcode 让**程序集代码本身成为系统的孪生概要建模代码**：�
 
 | 能力 | 做什么 | 入口 |
 | :--- | :--- | :--- |
-| **程序集浏览**（主线） | 打开 `.dll` / `.so` / `.out` / `.a` / `.o`，读概览、模块交联、信号数据与持久化定义；多个产物可组织成程序集树，支持分组与别名 | VS Code 插件 |
+| **程序集浏览**（主线） | 打开 `.dll` / `.so` / `.out` / `.a` / `.o`，读概览、模块交联、信号数据与持久化定义；多个产物可组织成程序集树，支持分组与别名；勾选的模块/信号可导出为 Drawio、Mermaid（.mmd）与 Markdown（.md） | VS Code 插件 |
 | **元数据模板** | 复制一个头文件或特性文件，把交联方向、信号语义、持久化标记写进声明层 —— 产物才「可解读」 | [`docs/templates.md`](docs/templates.md) |
 | **源码出图** | 源码文件或整个目录 → `.drawio`；资源管理器右键就地生成，适合只看某个局部模块的交联 | 插件右键 / `build` |
 | **产物 JSON** | 从产物读回结构，输出规范 JSON 供二次加工或接入自己的工具 | `inspect` |
@@ -149,7 +151,7 @@ node typescript/bin/drawcode.ts inspect bin/Release/net9.0/YourProject.dll --out
 ```bash
 cd editors/vscode
 npm install
-npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
+npm run package     # 产出 out/drawcode-artifact-viewer-0.4.0.vsix
 ```
 
 然后在 VS Code 里执行「扩展: 从 VSIX 安装…」，选中那个文件。装好后双击任一
@@ -157,7 +159,8 @@ npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
 
 想改代码调试：`npm install && npm run build`，然后按 `F5` 启动 Extension Development Host。
 
-前提：VS Code >= 1.90；`.dll` 需要 .NET 10 运行时（sidecar 随 VSIX 打包），ELF 与 `ar` 不需要。
+前提：VS Code >= 1.90；`.dll` 需要 .NET 10+ 运行时（sidecar 随 VSIX 打包，运行时本身不随包），
+ELF 与 `ar` 不需要；缺少运行时时扩展会显示安装指引，而不是空白页。
 详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)。
 
 ### 路径 C：源码 → drawio 图
@@ -165,7 +168,7 @@ npm run package     # 产出 out/drawcode-artifact-viewer-0.2.0.vsix
 **最快：插件右键。** 装好路径 B 的扩展后，在资源管理器里右键一个源文件或目录，
 选「生成 Drawio 图」，就地生成 `.drawio`。
 
-**或者用 CLI**（需要 Node 22.6+，无第三方依赖）：
+**或者用 CLI**（需要 Node 22.18+，无第三方依赖）：
 
 ```bash
 git clone <this-repo> && cd drawcode
@@ -287,6 +290,8 @@ drawcode 主张**让程序集代码本身承担这份概要**。一段声明层�
 
 | 想了解 | 读 |
 | :--- | :--- |
+| **产品承诺了什么，改行为时要同步什么** | **[需求与验收标准](docs/requirements.zh-CN.md)** —— 权威需求契约：每项能力、其验收判据，以及其余文档都要遵循的变更协议 |
+| **一次改动怎样才算够好，必须过哪道门** | **[测试与质量约束](docs/test-and-quality.zh-CN.md)** —— 质量目标、每级测试能看见与看不见什么、采信哪类证据、准入准出判据、实测记录、缺陷分级 |
 | 为什么设计是这个形状 | [`docs/architecture.md`](docs/architecture.md) |
 | 每一个注解键，含类型与默认值 | [`docs/annotations.md`](docs/annotations.md) |
 | `.drawio` 映射、路由规则、坐标系语义 | [`docs/drawio-format.md`](docs/drawio-format.md) |
@@ -299,6 +304,24 @@ drawcode 主张**让程序集代码本身承担这份概要**。一段声明层�
 | 构建、测试、加一门语言 | [`docs/contributing.md`](docs/contributing.md) |
 | 为下一门代码语言写适配层 | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
+## 维护本仓库
+
+[`docs/requirements.zh-CN.md`](docs/requirements.zh-CN.md) 是「产品承诺什么、每条承诺如何判定」的唯一权威来源。其余文档都解释某条承诺如何被兑现；与它冲突的那一份是错的。
+
+改一个行为不算完，配套的后续动作做完才算。下表即契约：
+
+| 如果你改了 | 你也必须更新 | 因为 |
+| :--- | :--- | :--- |
+| 任何用户可见行为 | [需求与验收标准](docs/requirements.zh-CN.md) 中对应的 REQ 与 AC | 需求**就是**承诺；发出却没有需求支撑的行为属于未记录，因而也未经约定 |
+| 源码摄取、注解语义或边派生 | [架构](docs/architecture.md)、[注解](docs/annotations.md)、[`.drawio` 格式](docs/drawio-format.md)，以及模型层期望输出 | 解析器、词汇表与几何合起来是一份契约；只改其一，测试全绿而文档说谎 |
+| 默认布局、路由或任何产出的几何 | [`.drawio` 格式](docs/drawio-format.md) 与几何期望输出 | 手工排版与已记录的布局都钉在该几何上，一次静默改动会破坏所有已在使用的图 |
+| 任何注解键或其语义 | [注解](docs/annotations.md) 与[元数据模板](docs/templates.md) | 一个键只定义一次、被两处消费；定义与模板分叉即为静默的数据丢失 |
+| 任何产物读取判定或产出字段 | [程序集产物格式](docs/artifact-format.md) 与产物测试期望 | 该 JSON 由编辑器与用户自建工具共同消费，是公开契约 |
+| 任何测试、门禁步骤或实测数字 | [测试与质量约束](docs/test-and-quality.zh-CN.md) **以及** [实测验证](docs/verification.md) | 门禁是契约、数字是记录；两者都在两处出现，必须一起动，否则其中一处会变成下一位读者轻信的过期主张 |
+| 任何文档 | 另一语言版本中的对应文档，且在同一次改动内 | 只存在于单一语言版本的行为描述是缺陷，不是翻译滞后 |
+
+本文件与 [`docs/index.md`](docs/index.md) 的主题表也算文档：只加在一处而不加在另一处的主题，等于没人能发现的一页。
+
 ## 开发
 
 ```bash
@@ -307,7 +330,7 @@ cd editors/vscode && node --test test/*.test.mjs   # 扩展测试（不依赖扩
 ```
 
 `tools/drawcode-metadata/` 下的 PE sidecar 是纯 .NET 10，只在 `inspect` 读 `.dll` 时才构建/运行；
-工具链其余部分只需要 Node 22.6+。
+工具链其余部分只需要 Node 22.18+。
 
 当前测试与验证数字（测试条数、幂等、schema、金标准复现、性能特征）见
 [`docs/verification.md`](docs/verification.md)。

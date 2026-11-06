@@ -18,7 +18,7 @@ node bin/drawcode.ts build src/*.c src/*.h --root src --out flow.drawio --svg fl
 ```
 
 **零运行时依赖。** devDependency 只有 `typescript` 与 `@types/node`，且仅服务 `typecheck` 与 IDE；
-Node ≥ 22.6 原生擦除类型直接跑 `.ts`，测试不需要 tsc，
+Node ≥ 22.18 原生擦除类型直接跑 `.ts`，测试不需要 tsc，
 也不需要 `@xmldom/xmldom`（XML 解析器 200 行就够，而且能精确复现金标准里的空元素拼写与转义）。
 
 ---

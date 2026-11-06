@@ -17,11 +17,11 @@ status: stable
 | | TypeScript |
 | :--- | :--- |
 | 目录 | [`typescript/`](../typescript/) |
-| 运行要求 | Node 22.6+（原生类型擦除） |
+| 运行要求 | Node 22.18+（原生类型擦除） |
 | 运行时依赖 | **无**（只用 Node 标准库） |
 | 入口 | `node typescript/bin/drawcode.ts` |
 | 测试 | `cd typescript && node --test` |
-| 测试数 | 211（3 条跳过；报表显示 212，因为把 `test/helpers.ts` 也算作一个条目） |
+| 测试数 | 229（5 条跳过） |
 | 维护指南 | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 
 ## 命令
@@ -60,13 +60,13 @@ node typescript/bin/drawcode.ts inspect tools/golden/small-cs/bin/Debug/net10.0/
 
 ## 依赖
 
-零运行时依赖是刻意属性，不是偶然。Node 22.6+ 在加载时擦除类型，`.ts` 入口无需构建步骤，也不需要 `node_modules`。XML 读写与 XSD 子集校验器是手写的：文档结构小，而且要与金标准逐字节对齐，引库反而要迁就它的怪癖。测试框架用内置的 `node --test`。
+零运行时依赖是刻意属性，不是偶然。Node 22.18+ 在加载时擦除类型，`.ts` 入口无需构建步骤，也不需要 `node_modules`。XML 读写与 XSD 子集校验器是手写的：文档结构小，而且要与金标准逐字节对齐，引库反而要迁就它的怪癖。测试框架用内置的 `node --test`。
 
 `@types/node` 与 `typescript` 只是 devDependencies，供 `npm run typecheck` 与编辑器补全；测试路径不加载它们。唯一例外是 `inspect` 的 PE/CLI 分支，它调用 [`tools/drawcode-metadata`](../tools/drawcode-metadata/)（.NET 10 sidecar，不在 npm 包内）；ELF 与 `ar` 在进程内读取。
 
 ## 测试
 
-`cd typescript && node --test` 跑 211 个测试（3 条跳过）：18 个一致性测试 + 193 个单元测试。报表显示 212，因为 `test/helpers.ts` 不含测试但匹配了发现规则。
+`cd typescript && node --test` 跑 229 个测试（5 条跳过）。跳过的是因为它们依赖仓库之外的东西——样本 DLL，或已编译的 `templates/c/example`——运行时会把原因打印出来。
 
 ## 有设计后果的开关
 

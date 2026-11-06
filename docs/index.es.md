@@ -12,6 +12,8 @@ a la versión inglesa.
 
 | Tema | Versiones de idioma | Qué cubre |
 | :--- | :--- | :--- |
+| **Requisitos y criterios de aceptación** | [English](requirements.md) · [中文](requirements.zh-CN.md) *(sin traducción al español todavía)* | El contrato autorizado: cada capacidad entregada bajo un número `REQ`, sus criterios de aceptación en forma WHEN/THEN, las restricciones transversales, la lista de lo diferido y el protocolo de cambio que siguen todos los demás documentos |
+| **Pruebas y calidad** | [English](test-and-quality.md) · [中文](test-and-quality.zh-CN.md) *(sin traducción al español todavía)* | Objetivos de calidad no negociables, qué puede y qué no puede ver cada nivel de prueba, qué cuenta como evidencia, la puerta de fusión, cómo se registran las cifras, la graduación de defectos y el riesgo residual |
 | **Arquitectura** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | Las capas, qué posee cada módulo, los dos flujos de datos (build y sync) y el razonamiento tras negarse a persistir una representación intermedia |
 | **Anotaciones** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Referencia a nivel de campo de cada clave de anotación: comentarios `@drawcode` y `@device` (C), atributos `[Drawcode]`, `[Device]` y `[Callout]` (C#) — con tipos, valores por defecto y ejemplos |
 | **Formato `.drawio`** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Mapeo de elementos, semántica de coordenadas, reglas de anclas y enrutado, y la forma de almacenamiento comprimido de draw.io |
@@ -23,6 +25,9 @@ a la versión inglesa.
 
 | Quieres… | Ve a |
 | :--- | :--- |
+| Comprobar qué se promete realmente y cómo se juzga | [Requisitos y criterios de aceptación](requirements.md) |
+| Cambiar un comportamiento y averiguar qué más tiene que moverse con él | [Requisitos → Protocolo de cambio](requirements.md#7-change-protocol) |
+| Saber si un cambio es suficientemente bueno y qué puerta debe pasar | [Pruebas y calidad](test-and-quality.md) |
 | Entender por qué el diseño tiene esta forma | [Arquitectura](architecture.es.md) |
 | Anotar tu propio código por primera vez | [Anotaciones](annotations.es.md) → luego [Inicio rápido](../README.es.md#inicio-rápido) |
 | Añadir un lenguaje fuente nuevo (Rust, Go, …) | [Arquitectura](architecture.es.md#capas-de-módulos) → [Contribuir](contributing.es.md) |

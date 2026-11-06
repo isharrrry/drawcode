@@ -23,9 +23,31 @@ status: stable
 | 依赖 | 说明 |
 |---|---|
 | VS Code >= 1.90 | 自定义编辑器 API |
-| .NET 10 运行时 | 仅 PE/CLI 程序集（`.dll`）需要，sidecar 随扩展打包；ELF/ar 不需要 |
+| .NET 10 运行时（或更高主版本） | 仅 PE/CLI 程序集（`.dll`）需要。sidecar 随扩展打包，但**不携带、不裁剪运行时**；ELF/ar 不需要 |
 
 Node.js 不再是运行前提：扩展宿主自带 Node，解析核心以 CommonJS 随 VSIX 提供。
+
+同一份 VSIX 同时用于 Windows 与 Linux：sidecar 是框架依赖的 `net10.0` 程序集，
+由目标机的 `dotnet` 启动，安装包本身不含平台相关的运行时。
+
+### 没有 .NET 时
+
+打开 `.dll` 时如果找不到可用的 .NET 运行时，扩展不会停在空白页或一直“解析中”，
+而是显示一张错误卡片，说明原因并给出当前平台的安装命令：
+
+- Windows：`winget install Microsoft.DotNet.Runtime.10`
+- Debian / Ubuntu：`sudo apt-get install -y dotnet-runtime-10.0`
+- Fedora：`sudo dnf install -y dotnet-runtime-10.0`
+- 其他发行版与离线安装包：<https://dotnet.microsoft.com/download/dotnet/10.0>
+
+卡片上可以直接打开安装说明，或安装后点“重新检查”。查找 `dotnet` 的顺序是
+`drawcode.dotnetPath` → `DRAWCODE_DOTNET` 环境变量 → `PATH` → `DOTNET_ROOT` →
+Windows / Linux 常见安装目录（例如 `%ProgramFiles%\dotnet`、`/usr/share/dotnet`、
+`/usr/lib/dotnet`、`~/.dotnet`、`/snap/bin`）。因此用 `dotnet-install.sh` 装在
+用户目录、没有进 `PATH` 的场景也能自动找到。
+
+Remote-SSH、WSL 与 Dev Container 下扩展运行在远端，请在远端安装；安装后通常需要
+重新加载窗口，再点“重新检查”。
 
 ## 使用
 
@@ -37,11 +59,13 @@ Node.js 不再是运行前提：扩展宿主自带 Node，解析核心以 Common
 打包安装：
 
 ```bash
-npm run package   # 程序集为 out/drawcode-artifact-viewer-0.2.0.vsix
+npm run package   # 程序集为 out/drawcode-artifact-viewer-0.4.0.vsix
 ```
 
-打包脚本会重新构建扩展、发布 `.NET` sidecar，并把 `dist/core` 与 sidecar
-一起放进 VSIX。安装后无需配置路径，也不需要仓库在场。
+打包脚本会重新构建扩展、发布**框架依赖**的 `.NET` sidecar，并把 `dist/core`
+与 sidecar 一起放进 VSIX；打包时会校验 runtimeconfig 不是自包含形态，确保
+安装包里不出现 .NET 运行时。安装后无需配置路径，也不需要仓库在场；
+`.dll` 解析仍要求目标机有 .NET 10+ 运行时。
 
 ## 程序集树（活动栏）
 
@@ -75,10 +99,32 @@ npm run package   # 程序集为 out/drawcode-artifact-viewer-0.2.0.vsix
   字段树**默认展开全部层级**，表头固定显示 `序号 / 字段 / 初值 / 偏移 / 大小`
   （枚举类型把「初值」列改名为「值」，隐藏偏移与大小）。窄栏时类型 chip 自动
   让位给字段名，窗口拖宽或拖动分栏后自动恢复。
-- 「导出 Drawio」把当前勾选的信号导出为 `.drawio`，默认文件名
-  `<程序集名>-模块交联.drawio`，默认目录就是程序集所在目录（可另存为）。
-  导出布局与屏幕一致：每个模块拆成 `模块路径-输出` / `模块路径-输入` 两个矩形，
-  信号名作为连线标签，同信号多跳用虚线连接，正交曲线走线。
+- 导出条位于模块树表头「模块 / 信号端口」右侧：左侧是「流可悬空」勾选框，
+  中间是导出格式下拉框（Drawio / Mermaid / Markdown），右侧是「导出」按钮。
+  格式与勾选随视图状态保存，默认 Drawio、默认不勾选。
+- 默认导出会补出对端：只勾一端时，`buildPortFlow` 带出的 context 对端也进入
+  导出图，保证每条数据流两端都有模块。
+- 勾选「流可悬空」后，导出只创建**实际勾选**的一侧。对侧模块名不创建，
+  只保留这条流：
+  - Drawio 的边允许只有一端，悬空端用 `targetPoint` / `sourcePoint` 落在
+    输出列右侧或输入列左侧的空白处；
+  - Mermaid 的 `flowchart` / `sequenceDiagram` 语法要求两端都存在，因此用
+    一个共享的 `void` 节点（时序图里是 `participant PV as void`）承接悬空端；
+  - Markdown 内的两张 mermaid 图同上，信号定义章节也不会出现对侧模块。
+- 格式选 **Drawio** 时生成 `.drawio`，默认文件名 `<程序集名>-模块交联.drawio`，
+  默认目录就是程序集所在目录（可另存为）。导出布局与屏幕一致：每个模块拆成
+  `模块路径-输出` / `模块路径-输入` 两个矩形，信号名作为连线标签，同信号多跳
+  用虚线连接，正交曲线走线。
+- 格式选 **Mermaid** 时生成 `.mmd`（`<程序集名>-模块交联.mmd`），内容是与
+  Drawio 同构的 `flowchart LR`：每个模块拆成输出/输入两个节点，普通数据流用
+  实线箭头，同信号关联用无箭头虚线并标注「同写 / 同读」。
+- 格式选 **Markdown** 时生成 `.md`（`<程序集名>-模块交联.md`），依次包含：
+  1. **部署交联图**：与 `.mmd` 相同的 mermaid 流程图；
+  2. **时序图**：mermaid `sequenceDiagram`，参与者是参与本次导出的模块，
+     消息按模块树当前阅读顺序排列（程序集元数据没有运行时时序，文档里会写明）；
+  3. **信号定义**：按模块树的多层级标题（程序集 → 命名空间 → 类型）分组，
+     每组一张信号定义表（信号 / 别名 / 方向 / 类型 / 单位 / 初值 / 标签 / 说明），
+     结构体与枚举信号再附一张完整字段定义表（字段 / 类型 / 初值 / 偏移 / 大小）。
 
 ## 从源码生成 Drawio 图
 
@@ -109,6 +155,7 @@ npm run package   # 程序集为 out/drawcode-artifact-viewer-0.2.0.vsix
 | `drawcode.showExcluded` | false | 默认显示元数据标记 Exclude 的条目 |
 | `drawcode.showCompilerGenerated` | false | 显示 `<Clone>$` 之类编译器生成的方法 |
 | `drawcode.inferEdges` | false | ELF 缺少显式元数据时，用符号表与重定位补出推断边 |
+| `drawcode.dotnetPath` | 空 | 自定义 `dotnet` 可执行文件路径；留空时自动查找（见上文“没有 .NET 时”） |
 
 ## 边界
 

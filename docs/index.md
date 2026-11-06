@@ -12,6 +12,8 @@ version.
 
 | Topic | Language versions | What it covers |
 | :--- | :--- | :--- |
+| **Requirements** | [English](requirements.md) · [中文](requirements.zh-CN.md) | The authoritative requirement contract: every promised capability, its acceptance criteria, the cross-cutting constraints, what is deliberately deferred, and the change protocol |
+| **Test and quality** | [English](test-and-quality.md) · [中文](test-and-quality.zh-CN.md) | Quality objectives, what each test level can and cannot see, which evidence is accepted, the entry and exit criteria of the gate, recorded measurements, defect grading and residual risk |
 | **Architecture** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | The layering, what each module owns, the two data flows (build and sync), and the reasoning behind refusing to persist an intermediate representation |
 | **Annotations** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | Field-level reference for every annotation key: `@drawcode` and `@device` comments (C), `[Drawcode]`, `[Device]` and `[Callout]` attributes (C#) — with types, defaults and examples |
 | **`.drawio` format** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | Element mapping, coordinate semantics, anchor and routing rules, and draw.io's compressed storage form |
@@ -27,6 +29,9 @@ version.
 
 | You want to… | Go to |
 | :--- | :--- |
+| Know what the product promises | [Requirements](requirements.md) |
+| Change a behaviour and need to know what else to update | [Requirements § Change protocol](requirements.md#7-change-protocol) |
+| Know whether a change is good enough, and the gate it must pass | [Test and quality](test-and-quality.md) |
 | Understand why the design is shaped this way | [Architecture](architecture.md) |
 | Annotate your own code for the first time | [Annotations](annotations.md) → then [Quick start](../README.md#quick-start) |
 | Add a new source language (Rust, Go, …) | [Architecture](architecture.md#module-layering) → [Contributing](contributing.md) |
@@ -42,13 +47,16 @@ version.
 
 ## About these documents
 
-1. **Every number comes from a command that was actually run.** Nothing is estimated. Where a
+1. **The requirements document is the authority; every other page elaborates it.** The other pages
+   explain *how* a promise is kept, not *what* is promised. Where a page and
+   [Requirements](requirements.md) disagree, Requirements wins and the page is corrected.
+2. **Every number comes from a command that was actually run.** Nothing is estimated. Where a
    figure has not been measured, the document says so and points to
    [Known limitations](../README.md#known-limitations-listed-honestly) rather than filling the gap.
-2. **Changing behaviour means updating the English document and the Chinese translation in the same
+3. **Changing behaviour means updating the English document and the Chinese translation in the same
    change.** A documented behaviour that exists only in one language version is a bug, not a
    translation lag. Spanish pages that have not been revised are marked *outdated* and point to the
    English version.
-3. **Unverified and known-broken behaviour is stated explicitly.** Two examples worth calling out:
+4. **Unverified and known-broken behaviour is stated explicitly.** Two examples worth calling out:
    the SVG preview does not share the `.drawio` edge routing, and the offline renderer cannot draw
    `jumpStyle` line jumps. Both are written down where a reader will hit them, not buried.

@@ -6,8 +6,10 @@
 > cómo fluyen las señales, qué datos son persistentes. Explora los ensamblados en VS Code, o dibuja
 > el código fuente anotado como diagramas editables de [draw.io](https://www.drawio.com/).
 
-Funciona en Windows, Linux y macOS. La CLI no tiene dependencias de ejecución de terceros: Node 22.6+.
-Solo hace falta un runtime .NET 10 para leer artefactos PE/CLI `.dll` mediante el sidecar incluido.
+Funciona en Windows, Linux y macOS. La CLI no tiene dependencias de ejecución de terceros: Node 22.18+.
+Solo hace falta un runtime .NET 10+ para leer artefactos PE/CLI `.dll` mediante el sidecar incluido;
+el runtime no se incluye ni se recorta. Si falta, la extensión e `inspect` muestran instrucciones de
+instalación en lugar de fallar en silencio, y el mismo VSIX funciona en Windows y Linux.
 
 ![drawcode output](docs/assets/small-c.png)
 
@@ -18,7 +20,7 @@ sistema**: sin un proyecto de modelado aparte, solo una capa de declaraciones de
 
 | Capacidad | Qué hace | Punto de entrada |
 | :--- | :--- | :--- |
-| **Exploración de ensamblados** (la línea principal) | Abre un `.dll` / `.so` / `.out` / `.a` / `.o` y lee su resumen, las interconexiones entre módulos, los datos de señal y las definiciones de persistencia; varios artefactos pueden organizarse en un árbol de ensamblados con grupos y alias | Extensión de VS Code |
+| **Exploración de ensamblados** (la línea principal) | Abre un `.dll` / `.so` / `.out` / `.a` / `.o` y lee su resumen, las interconexiones entre módulos, los datos de señal y las definiciones de persistencia; varios artefactos pueden organizarse en un árbol de ensamblados con grupos y alias; los módulos/señales marcados se exportan a Drawio, Mermaid (.mmd) y Markdown (.md) | Extensión de VS Code |
 | **Plantillas de metadatos** | Copia un fichero de cabecera o de atributos y pon la dirección de interconexión, la semántica de señal y las marcas de persistencia en la capa de declaración — eso es lo que hace legible un artefacto | [`docs/templates.md`](docs/templates.md) |
 | **Fuente a diagrama** | Un fichero fuente o una carpeta entera → `.drawio`; clic derecho en el explorador para generar en el sitio, útil cuando solo quieres un grupo local de módulos | Menú contextual de la extensión / `build` |
 | **JSON del artefacto** | Relee la estructura del artefacto como JSON canónico, para posprocesar o alimentar tus propias herramientas | `inspect` |
@@ -180,7 +182,7 @@ publicada en el marketplace.
 ```bash
 cd editors/vscode
 npm install
-npm run package     # genera out/drawcode-artifact-viewer-0.2.0.vsix
+npm run package     # genera out/drawcode-artifact-viewer-0.4.0.vsix
 ```
 
 Luego ejecuta «Extensiones: Instalar desde VSIX…» en VS Code y elige ese fichero. Haz doble clic en
@@ -189,8 +191,9 @@ cualquier `.dll` / `.so` / `.out` / `.a` / `.o`, o ejecuta el comando `Drawcode:
 Para modificarla: `npm install && npm run build` y luego pulsa `F5` para lanzar el Extension
 Development Host.
 
-Requisitos: VS Code >= 1.90; los `.dll` necesitan el runtime .NET 10 (el sidecar viaja dentro del
-VSIX), los ELF y los `ar` no. Detalles en [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
+Requisitos: VS Code >= 1.90; los `.dll` necesitan el runtime .NET 10+ (el sidecar viaja dentro del
+VSIX, el runtime no), los ELF y los `ar` no. Si falta el runtime, la extensión muestra instrucciones
+de instalación en lugar de una vista vacía. Detalles en [`docs/vscode-extension.md`](docs/vscode-extension.md) *(中文)*.
 
 ### Camino C: fuente → drawio
 
@@ -198,7 +201,7 @@ VSIX), los ELF y los `ar` no. Detalles en [`docs/vscode-extension.md`](docs/vsco
 derecho en un fichero o carpeta del explorador y elige «Generar diagrama Drawio»; el `.drawio`
 aparece en el sitio.
 
-**O usa la CLI** (Node 22.6+, sin dependencias de ejecución de terceros):
+**O usa la CLI** (Node 22.18+, sin dependencias de ejecución de terceros):
 
 ```bash
 git clone <this-repo> && cd drawcode
@@ -331,6 +334,8 @@ en el lado de la implementación. El modelo dice lo que *debería* haber; el art
 
 | Para saber sobre | Lee |
 | :--- | :--- |
+| **Qué promete el producto, y qué actualizar cuando cambias un comportamiento** | **[Requisitos y criterios de aceptación](docs/requirements.md)** *(sin traducción al español todavía)* — el contrato autorizado de requisitos: cada capacidad, sus criterios de aceptación y el protocolo de cambio que siguen todos los demás documentos |
+| **Cómo se juzga que un cambio es suficientemente bueno, y qué puerta debe pasar** | **[Restricciones de prueba y calidad](docs/test-and-quality.md)** *(sin traducción al español todavía)* — objetivos de calidad, qué puede y qué no puede ver cada nivel de prueba, qué evidencia se acepta, criterios de entrada y salida, mediciones registradas y graduación de defectos |
 | Por qué el diseño tiene esta forma | [`docs/architecture.md`](docs/architecture.md) |
 | Cada clave de anotación, con tipos y valores por defecto | [`docs/annotations.md`](docs/annotations.md) |
 | Mapeo de `.drawio`, reglas de enrutado, semántica de coordenadas | [`docs/drawio-format.md`](docs/drawio-format.md) |
@@ -344,6 +349,28 @@ en el lado de la implementación. El modelo dice lo que *debería* haber; el art
 | Compilar, probar, añadir un lenguaje | [`docs/contributing.md`](docs/contributing.md) |
 | Escribir el adaptador para el siguiente lenguaje | [`typescript/SKILL.md`](typescript/SKILL.md) |
 
+## Mantenimiento de este repositorio
+
+[`docs/requirements.md`](docs/requirements.md) es la única fuente autorizada de lo que el producto
+promete y de cómo se juzga cada promesa. Todo otro documento explica cómo se cumple una promesa;
+cuando uno de ellos lo contradice, ese es el equivocado.
+
+Un cambio de comportamiento no está terminado hasta que se hace su seguimiento. La tabla siguiente
+es el contrato:
+
+| Si cambias | También debes actualizar | Porque |
+| :--- | :--- | :--- |
+| Cualquier comportamiento visible para el usuario | El REQ y el AC correspondientes en [Requisitos](docs/requirements.md) | El requisito *es* la promesa; un comportamiento que se publica sin uno está indocumentado y por tanto no acordado |
+| La ingestión de código, la semántica de anotaciones o la derivación de aristas | [Arquitectura](docs/architecture.md), [Anotaciones](docs/annotations.md), [Formato `.drawio`](docs/drawio-format.md) y las salidas esperadas del modelo | El analizador, el vocabulario y la geometría forman un solo contrato; actualizar uno sin los otros deja la suite verde y la documentación falsa |
+| La disposición por defecto, el enrutado o cualquier geometría emitida | [Formato `.drawio`](docs/drawio-format.md) y las salidas de geometría esperadas | Las disposiciones hechas a mano están fijadas a esa geometría, así que un cambio silencioso rompe todos los diagramas ya en uso |
+| Una clave de anotación o su semántica | [Anotaciones](docs/annotations.md) y [Plantillas](docs/templates.md) | Una clave se define una vez y se consume dos veces; una divergencia es pérdida silenciosa de datos |
+| Una decisión de lectura de artefactos o un campo emitido | [Formato de artefactos](docs/artifact-format.md) y las expectativas de prueba de artefactos | Ese JSON lo consumen el editor y las herramientas de los usuarios; es un contrato público |
+| Cualquier prueba, paso de la puerta o cifra medida | [Pruebas y calidad](docs/test-and-quality.md) **y** [Verificación](docs/verification.md) | La puerta es un contrato y las cifras un registro. Ambos se declaran en dos lugares, así que ambos tienen que moverse, o uno se convierte en una afirmación obsoleta en la que el siguiente lector confía |
+| Cualquier documento | Su contraparte en los otros idiomas, en el mismo cambio | Un comportamiento documentado en un solo idioma es un fallo, no un retraso de traducción |
+
+Las tablas de temas de este archivo y de [`docs/index.md`](docs/index.md) cuentan también como
+documentos: un tema añadido a una y no a la otra es una página que nadie encuentra.
+
 ## Desarrollo
 
 ```bash
@@ -352,7 +379,7 @@ cd editors/vscode && node --test test/*.test.mjs    # pruebas de la extensión
 ```
 
 El sidecar PE de `tools/drawcode-metadata/` es .NET 10 puro y solo se compila/ejecuta cuando `inspect` lee un
-`.dll`; el resto de la cadena de herramientas solo necesita Node 22.6+.
+`.dll`; el resto de la cadena de herramientas solo necesita Node 22.18+.
 
 Las cifras actuales de prueba y verificación (número de tests, idempotencia, esquema, reproducción de
 los dorados, características de rendimiento) están en [`docs/verification.md`](docs/verification.md).

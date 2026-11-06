@@ -18,11 +18,11 @@ CLI has no build step and no `node_modules` on its path.
 | | TypeScript |
 | :--- | :--- |
 | Directory | [`typescript/`](../typescript/) |
-| Requires | Node 22.6+ (native type stripping) |
+| Requires | Node 22.18+ (native type stripping) |
 | Runtime dependencies | **none** (Node standard library only) |
 | Entry point | `node typescript/bin/drawcode.ts` |
 | Tests | `cd typescript && node --test` |
-| Test count | 211 (3 skipped; the runner reports 212 because it counts `test/helpers.ts`) |
+| Test count | 229 (5 skipped) |
 | Guide | [`typescript/SKILL.md`](../typescript/SKILL.md) |
 
 ## Commands
@@ -62,7 +62,7 @@ result; removed nodes must be laid out again rather than leaving holes.
 
 ## Dependencies
 
-No runtime dependencies is a deliberate property, not an accident. Node 22.6+ strips types at load
+No runtime dependencies is a deliberate property, not an accident. Node 22.18+ strips types at load
 time, so the `.ts` entry point runs without a build step or `node_modules`. The XML reader/writer and
 the XSD subset validator are hand-written because the document shapes are small and the goldens are
 byte-aligned; a library would bring its own quirks. `node --test` is the runner.
@@ -74,8 +74,9 @@ only; the test path does not load them. The one exception is `inspect` on PE/CLI
 
 ## Tests
 
-`cd typescript && node --test` runs 211 tests (3 skipped): 18 conformance and 193 unit. The runner
-reports 212 because `test/helpers.ts` contains no tests but matches the discovery pattern.
+`cd typescript && node --test` runs 229 tests (5 skipped). The skipped ones need something outside
+the repository — a sample DLL, or a compiled `templates/c/example` — and print their reason at run
+time.
 
 ## Build switches
 

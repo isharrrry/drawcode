@@ -20,13 +20,15 @@ shows up as a golden diff, which is exactly where it should be reviewed.
 
 | Toolchain | Version required | Used for |
 | :--- | :--- | :--- |
-| Node | 22.6 or newer | the implementation, tests, `tools/render/` |
+| Node | 22.18 or newer | the implementation, tests, `tools/render/` |
 | .NET SDK + runtime | 10 | only the PE metadata sidecar (`tools/drawcode-metadata`) |
 
 Parsing, layout, routing and XML writing use the Node standard library only. `npm run typecheck`
 needs the `typescript` devDependency; it is not on the test path. The PE sidecar is a separate
-net10.0 project: without .NET 10, `inspect` reports `tool-unavailable` for `.dll` inputs, while
-ELF/ar reading still works in-process.
+net10.0 project: without .NET 10, `inspect` reports `dotnet-missing` (or
+`dotnet-runtime-missing` when a host exists but no compatible runtime does) for `.dll` inputs,
+while ELF/ar reading still works in-process. The VS Code extension turns the same diagnostics
+into a page-level install prompt.
 
 ## Repository map
 
@@ -51,8 +53,8 @@ exceptions travel with a product instead — `drawcode-metadata` is published in
 ## Running the tests
 
 ```bash
-cd typescript && node --test                              # 211 tests, 3 skipped
-cd editors/vscode && node --test test/*.test.mjs          # 79 tests
+cd typescript && node --test                              # 229 tests, 5 skipped
+cd editors/vscode && node --test test/*.test.mjs          # 93 tests
 ```
 
 The suite reports failures by layer — parse, IR/edges, `.drawio` I/O, codegen, schema, SVG,
@@ -144,7 +146,7 @@ routing result is a specification change.
 
 | Not verified | Why, and what it means for you |
 | :--- | :--- |
-| **PE artifacts need .NET 10.** | The sidecar is a separate net10.0 project. Without it, `.dll` inspection reports `tool-unavailable`; ELF/ar reading is in-process and unaffected. |
+| **PE artifacts need .NET 10.** | The sidecar is a separate net10.0 project. Without it, `.dll` inspection reports `dotnet-missing` / `dotnet-runtime-missing` with install guidance; ELF/ar reading is in-process and unaffected. |
 | **The artifact model is outside the source goldens.** | `inspect` has its own tests (`artifact.test.ts`, `artifact-elf.test.ts`); L1–L3 cover the source pipeline only. |
 | **The offline renderer cannot draw `jumpStyle=arc`.** | `jumpStyle` is a draw.io extension absent from the mxGraph core. Generated files configure it correctly; verify the jumps in draw.io. |
 | **CJK text measurement in the offline renderer is estimated.** | jsdom reports `offsetWidth = 0`, so glyph widths are approximated and label *avoidance* may be off. |

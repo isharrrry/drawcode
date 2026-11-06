@@ -11,6 +11,8 @@
 
 | 主题 | 语言版本 | 涵盖内容 |
 | :--- | :--- | :--- |
+| **需求与验收** | [English](requirements.md) · [中文](requirements.zh-CN.md) | 权威需求契约：每项被承诺的能力、其验收判据、横切约束、刻意推迟的事项，以及变更协议 |
+| **测试与质量** | [English](test-and-quality.md) · [中文](test-and-quality.zh-CN.md) | 质量目标、每级测试能看见与看不见什么、采信哪类证据、门禁的准入与准出、实测记录、缺陷分级与残余风险 |
 | **架构** | [English](architecture.md) · [中文](architecture.zh-CN.md) · [Español](architecture.es.md) | 分层、每个模块的职责边界、两条数据流（build 与 sync），以及拒绝持久化中间表示的理由 |
 | **注解** | [English](annotations.md) · [中文](annotations.zh-CN.md) · [Español](annotations.es.md) | 每个注解键的字段级参考：`@drawcode` 与 `@device` 注释（C）、`[Drawcode]`、`[Device]` 与 `[Callout]` 特性（C#）—— 含类型、默认值与示例 |
 | **`.drawio` 格式** | [English](drawio-format.md) · [中文](drawio-format.zh-CN.md) · [Español](drawio-format.es.md) | 元素映射、坐标系语义、锚点与路由规则，以及 draw.io 的压缩存储形态 |
@@ -26,6 +28,9 @@
 
 | 你想…… | 去这里 |
 | :--- | :--- |
+| 知道产品承诺了什么 | [需求与验收](requirements.zh-CN.md) |
+| 改行为前要知道还需同步什么 | [需求与验收 § 变更协议](requirements.zh-CN.md#7-变更协议) |
+| 要知道一次改动怎样才算够好、必须过哪道门 | [测试与质量](test-and-quality.zh-CN.md) |
 | 理解设计为什么是这个形状 | [架构](architecture.zh-CN.md) |
 | 第一次给自己的代码加注解 | [注解](annotations.zh-CN.md) → 然后是[快速开始](../README.zh-CN.md#快速开始) |
 | 新增一门源语言（Rust、Go……） | [架构](architecture.zh-CN.md#模块分层) → [参与贡献](contributing.zh-CN.md) |
@@ -41,11 +46,13 @@
 
 ## 关于这些文档
 
-1. **每个数字都来自真正跑过的命令。** 没有任何估测。凡是尚未测量的数字，
+1. **需求文档是权威，其余页面是它的展开。** 其余页面解释**如何**兑现承诺，而不是**承诺什么**。
+   某页与[需求与验收](requirements.zh-CN.md)冲突时，以需求为准，该页需要改正。
+2. **每个数字都来自真正跑过的命令。** 没有任何估测。凡是尚未测量的数字，
    文档会如实说明，并指向[已知限制](../README.zh-CN.md#已知限制诚实列出)，
    而不是把它填上。
-2. **改行为就要在同一次改动里更新英文文档与中文翻译。** 一个只存在于
+3. **改行为就要在同一次改动里更新英文文档与中文翻译。** 一个只存在于
    单一语言版本里的行为描述是缺陷，不是翻译滞后；未修订的西语页面会标注「已过时」。
-3. **未验证与已知损坏的行为都会被明确写出。** 有两个例子值得点明：
+4. **未验证与已知损坏的行为都会被明确写出。** 有两个例子值得点明：
    SVG 预览不与 `.drawio` 共享边路由，离线渲染器也画不出
    `jumpStyle` 跳线。两处都写在读者会撞见的地方，而不是埋起来。
