@@ -1304,3 +1304,240 @@ test("连线车道：竖直区间重叠时分开，互不重叠时复用", () =>
   // 110 开始的新线已经在第一条结束后，可以复用 lane 0。
   assert.equal(lanes[3], 0);
 });
+
+// ── Mermaid / Markdown 导出 ─────────────────────────────────────────────
+
+test("Mermaid：部署交联图按模块拆输出/输入节点，信号作为边标签", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMermaidFlow(flow);
+  assert.match(text, /^flowchart LR/);
+  assert.match(text, /m\d+_out\["M\.Producer-输出"\]:::dcOut/);
+  assert.match(text, /m\d+_in\["M\.Producer-输入"\]:::dcIn/);
+  assert.match(text, /m\d+_in\["M\.Consumer-输入"\]:::dcIn/);
+  assert.match(text, /m\d+_in\["M\.Consumer2-输入"\]:::dcIn/);
+  assert.equal(text.split("\n").filter((line) => line.includes("-->")).length, 2);
+  assert.match(text, /m\d+_out -->\|"FRM {2}· {2}frame"\| m\d+_in/);
+});
+
+test("Mermaid：同信号关联导出为无箭头虚线并标注同写", () => {
+  const sharedModel = {
+    info: { path: "shared.dll", format: "pe-cli", hasMetadata: true },
+    modules: [
+      moduleRow("A", "A", "A", [], { signals: 1, funcs: 1, types: 0 }),
+      moduleRow("B", "B", "B", [], { signals: 0, funcs: 1, types: 0 }),
+    ],
+    types: [],
+    signals: [signal("sig", "g_shared", "out", { path: "A" })],
+    funcs: [
+      func("fa", "WriteA", "A", [], ["sig"]),
+      func("fb", "WriteB", "B", [], ["sig"]),
+    ],
+    edges: [],
+    diagnostics: [],
+  };
+  const outputs = D.getPorts(sharedModel, {}).bySignal.get("sig").outputs.map((port) => port.key);
+  const flow = D.buildPortFlow(sharedModel, new Set(outputs), {});
+  const text = D.buildMermaidFlow(flow);
+  assert.equal(flow.edges[0].kind, "same-signal");
+  assert.ok(text.includes('-.-|"同写 · g_shared"|'), text);
+  assert.equal(text.split("\n").filter((line) => line.includes("-->")).length, 0);
+});
+
+test("Mermaid：时序图按模块树顺序声明参与者，消息带同写标注", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMermaidSequence(flow);
+  assert.match(text, /^sequenceDiagram/);
+  assert.ok(text.includes("autonumber"));
+  assert.match(text, /participant P\d+ as M\.Producer/);
+  assert.match(text, /participant P\d+ as M\.Consumer/);
+  assert.match(text, /participant P\d+ as M\.Consumer2/);
+  const messages = text.split("\n").filter((line) => line.includes("->>"));
+  assert.equal(messages.length, 2);
+  assert.ok(messages.every((line) => /^  P\d+->>P\d+: FRM {2}· {2}frame$/.test(line)), text);
+});
+
+test("Markdown：依次包含部署交联图、时序图与多层级标题下的信号定义表", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMarkdownReport(MODEL, flow, { title: "Demo.dll" });
+
+  const deploy = text.indexOf("## 部署交联图");
+  const sequence = text.indexOf("## 时序图");
+  const defs = text.indexOf("## 信号定义");
+  assert.ok(deploy > 0, "缺少部署交联图章节");
+  assert.ok(sequence > deploy, "时序图必须排在部署交联图之后");
+  assert.ok(defs > sequence, "信号定义必须排在时序图之后");
+  assert.ok(text.includes("```mermaid\nflowchart LR"));
+  assert.ok(text.includes("```mermaid\nsequenceDiagram"));
+
+  // 多层级标题跟随模块树：assembly (###) → 模块 (####)。
+  assert.ok(text.includes("\n### M\n"), text);
+  assert.ok(text.includes("\n#### Producer\n"));
+  assert.ok(text.includes("\n#### Consumer\n"));
+
+  // 信号定义表：表头齐全，frame 在 Producer 是输出、在 Consumer 是输入。
+  assert.ok(text.includes("| 信号 | 别名 | 方向 | 类型 | 单位 | 初值 | 标签 | 说明 |"));
+  assert.ok(text.includes("| frame | FRM | 输出 | Frame |"));
+  assert.ok(text.includes("| frame | FRM | 输入 | Frame |"));
+  assert.ok(text.includes("**frame 字段定义**"));
+  // 结构字段一路展开到基本类型，路径用 / 串联。
+  assert.ok(text.includes("| cfg/inner/flag | int32 |"));
+});
+
+test("Markdown：标题层级超过 6 级时压平在 ###### 下", () => {
+  const ids = ["R", "R.A", "R.A.B", "R.A.B.C", "R.A.B.C.D", "R.A.B.C.D.E", "R.A.B.C.D.E.F"];
+  const modules = ids.map((id, index) => moduleRow(
+    id,
+    id.split(".").pop(),
+    id.replace(/\./g, "/"),
+    index + 1 < ids.length ? [ids[index + 1]] : [],
+    { signals: index + 1 === ids.length ? 1 : 0, funcs: index + 1 === ids.length ? 1 : 0, types: 0 },
+  ));
+  const model = {
+    info: { path: "deep.dll", format: "pe-cli", hasMetadata: true },
+    modules,
+    types: [],
+    signals: [signal("deep", "deep_sig", "out", { path: "R/A/B/C/D/E/F" })],
+    funcs: [func("fd", "Write", "R/A/B/C/D/E/F/Write", [], ["deep"])],
+    edges: [],
+    diagnostics: [],
+  };
+  const flow = D.buildPortFlow(model, new Set([D.portKeyOf("o", "R.A.B.C.D.E.F", "deep")]), {});
+  const text = D.buildMarkdownReport(model, flow, { title: "deep.dll" });
+  assert.ok(text.includes("\n###### F\n"));
+  assert.equal(text.includes("\n####### "), false);
+});
+
+test("Markdown：表格单元里的竖线与换行被转义，不破坏表格", () => {
+  const model = {
+    ...MODEL,
+    types: [],
+    signals: [signal("tricky", 'a|b', "out", {
+      path: "M.Producer/tricky",
+      note: "第一行\n第二行",
+      alias: "A|B",
+    })],
+    funcs: [
+      func("ft", "Write", "M.Producer/Write", [], ["tricky"]),
+      func("fr", "Read", "M.Consumer/Read", ["tricky"], []),
+    ],
+  };
+  const checked = new Set([D.portKeyOf("o", "M.Producer", "tricky")]);
+  const flow = D.buildPortFlow(model, checked, {});
+  assert.equal(flow.edges.length, 1);
+  const text = D.buildMarkdownReport(model, flow, { title: "tricky.dll" });
+  assert.ok(text.includes(String.raw`| a\|b | A\|B | 输出 |`), text);
+  assert.ok(text.includes("第一行<br>第二行"));
+  const flowchart = D.buildMermaidFlow(flow);
+  assert.ok(flowchart.includes("A#124;B  ·  a#124;b"), flowchart);
+});
+
+test("导出图：三种导出共享同一裁剪规则，孤立勾选仍保留模块", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const graph = D.exportGraph(flow);
+  assert.equal(graph.edges.length, 2);
+  assert.deepEqual(
+    Array.from(graph.modules, (module) => module.path),
+    ["M.Consumer", "M.Consumer2", "M.Producer"],
+    "模块按树行号稳定排序",
+  );
+
+  // 只有写者的孤立端口没有边；此时不能输出一张空图，仍要保留模块清单。
+  const isolated = D.exportGraph(flowFor(new Set([KEY.soloOut()])));
+  assert.equal(isolated.edges.length, 0);
+  assert.deepEqual(Array.from(isolated.modules, (module) => module.path), ["M.Producer"]);
+});
+
+// ── 流可悬空 ────────────────────────────────────────────────────────────
+
+test("流可悬空：只勾输出时对侧不建模块，缺端在边上标出", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const completed = D.exportGraph(flow);
+  assert.equal(completed.modules.length, 3, "默认仍补出两个消费者模块");
+
+  const dangling = D.exportGraph(flow, { allowDangling: true });
+  assert.deepEqual(
+    Array.from(dangling.modules, (module) => module.path),
+    ["M.Producer"],
+    "context 对端不创建模块",
+  );
+  assert.equal(dangling.edges.length, 2);
+  assert.equal(dangling.danglingCount, 2);
+  assert.ok(dangling.edges.every((edge) => edge.fromMissing === false && edge.toMissing === true));
+});
+
+test("流可悬空：只勾输入时输出端成为缺端，只保留被勾选的模块", () => {
+  const flow = flowFor(new Set([KEY.frameIn()]));
+  const dangling = D.exportGraph(flow, { allowDangling: true });
+  assert.deepEqual(
+    Array.from(dangling.modules, (module) => module.path),
+    ["M.Consumer"],
+  );
+  assert.equal(dangling.danglingCount, 1);
+  assert.equal(dangling.edges[0].fromMissing, true);
+  assert.equal(dangling.edges[0].toMissing, false);
+});
+
+test("流可悬空：两端都显式勾选时不产生悬空流", () => {
+  const flow = flowFor(new Set([KEY.frameOut(), KEY.frameIn(), KEY.frameIn2()]));
+  const graph = D.exportGraph(flow, { allowDangling: true });
+  assert.equal(graph.danglingCount, 0);
+  assert.deepEqual(
+    Array.from(graph.modules, (module) => module.path),
+    ["M.Consumer", "M.Consumer2", "M.Producer"],
+  );
+});
+
+test("Mermaid 部署图：流可悬空时用共享 void 节点承接缺端", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMermaidFlow(flow, { allowDangling: true });
+  assert.ok(text.includes('void_node["void"]:::dcVoid'), text);
+  assert.equal(text.includes("M.Consumer-输入"), false, "对侧模块名不应出现");
+  const flows = text.split("\n").filter((line) => line.includes("-->"));
+  assert.equal(flows.length, 2);
+  assert.ok(flows.every((line) => line.includes("void_node")), text);
+});
+
+test("Mermaid 时序图：流可悬空时用 void 参与者承接缺端", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMermaidSequence(flow, { allowDangling: true });
+  assert.ok(text.includes("participant PV as void"), text);
+  assert.equal(text.includes("as M.Consumer"), false, "对侧模块名不应出现");
+  const messages = text.split("\n").filter((line) => line.includes("->>"));
+  assert.equal(messages.length, 2);
+  assert.ok(messages.every((line) => /^  P\d+->>PV: /.test(line)), text);
+});
+
+test("Markdown：流可悬空时不输出对侧模块的章节与信号表", () => {
+  const flow = flowFor(new Set([KEY.frameOut()]));
+  const text = D.buildMarkdownReport(MODEL, flow, { title: "Demo.dll", allowDangling: true });
+  assert.ok(text.includes("其中悬空流 2 条"), text);
+  assert.ok(text.includes("void_node"));
+  assert.ok(text.includes("\n#### Producer\n"));
+  assert.equal(text.includes("\n#### Consumer\n"), false);
+  assert.equal(text.includes("\n#### Consumer2\n"), false);
+});
+
+test("Mermaid：时序图把分号与 # 换成全角，避免消息被截断", () => {
+  // 分号是 sequenceDiagram 的语句分隔符；`#` 会开启实体编码并把后续文本吞掉。
+  // 两者都必须替换，否则含这些字符的信号名会导致整张图解析失败或丢字。
+  const model = {
+    info: { path: "tricky.dll", format: "pe-cli", hasMetadata: true },
+    modules: [
+      moduleRow("A", "A", "A", ["B"], { signals: 1, funcs: 1, types: 0 }),
+      moduleRow("B", "B", "B", [], { signals: 0, funcs: 1, types: 0 }),
+    ],
+    types: [],
+    signals: [signal("s", "a;b#c", "out", { path: "A/s", alias: "X;Y#Z" })],
+    funcs: [
+      func("fw", "Write", "A/Write", [], ["s"]),
+      func("fr", "Read", "B/Read", ["s"], []),
+    ],
+    edges: [],
+    diagnostics: [],
+  };
+  const flow = D.buildPortFlow(model, new Set([D.portKeyOf("o", "A", "s")]), {});
+  const text = D.buildMermaidSequence(flow);
+  assert.ok(text.includes("X；Y＃Z  ·  a；b＃c"), text);
+  assert.equal(/[:].*;/.test(text.split("\n").filter((line) => line.includes("->>"))[0]), false);
+  assert.equal(text.includes("#"), false);
+});

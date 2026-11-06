@@ -2612,6 +2612,471 @@
     };
   }
 
+  // ── Mermaid / Markdown 导出 ────────────────────────────────────────────
+  //
+  // mmd 与 md 里的 mermaid 都从同一份 `flow` 生成：勾选什么就导出什么，
+  // 不重新解析模型。drawio 用「模块-输出 / 模块-输入」两列矩形表达交联，
+  // mermaid 沿用同一组实体，只换成 flowchart / sequenceDiagram 语法。
+  // 三个导出器共享 `exportGraph` 的裁剪规则，避免「drawio 有、mermaid 没有」。
+
+  /**
+   * 导出用的裁剪结果：只保留两端节点定义都存在的边；没有任何边时退回全部节点
+   * （用户可能只想导出勾选出来的模块清单）。模块按树行号排序，与左侧阅读顺序一致。
+   *
+   * `options.allowDangling` 对应界面上的「流可悬空」：
+   *   - 默认 false：勾选一侧时，`buildPortFlow` 带出的 context 对端也会落进
+   *     导出图，保证每条流两端都有模块，这是旧的补齐行为；
+   *   - true：只导出用户**显式勾选**的一侧。context 对端不创建模块，边以
+   *     `fromMissing` / `toMissing` 标出缺端，由各导出器决定画法
+   *     （drawio 用浮动端点；mermaid 的两种图必须两端，故用 void 节点占位）。
+   */
+  function exportGraph(flow, options) {
+    options = options || {};
+    var allowDangling = options.allowDangling === true;
+    if (flow === null || flow === undefined) return null;
+    var nodeById = new Map();
+    (flow.nodes || []).forEach(function (node) { nodeById.set(node.nodeId, node); });
+
+    var edges = [];
+    var used = new Set();
+    (flow.edges || []).forEach(function (edge) {
+      var fromNode = nodeById.get(edge.from);
+      var toNode = nodeById.get(edge.to);
+      if (fromNode === undefined || toNode === undefined) return;
+      // context 节点是「勾一端时自动带出的对端」，不是用户显式勾选的那一侧。
+      var fromMissing = allowDangling && fromNode.context === true;
+      var toMissing = allowDangling && toNode.context === true;
+      if (fromMissing && toMissing) return;
+      edges.push(Object.assign({}, edge, {
+        fromMissing: fromMissing,
+        toMissing: toMissing,
+      }));
+      if (!fromMissing) used.add(edge.from);
+      if (!toMissing) used.add(edge.to);
+    });
+    if (used.size === 0) {
+      (flow.nodes || []).forEach(function (node) {
+        if (allowDangling && node.context === true) return;
+        used.add(node.nodeId);
+      });
+    }
+
+    var byModule = new Map();
+    used.forEach(function (nodeId) {
+      var node = nodeById.get(nodeId);
+      if (node === undefined) return;
+      var current = byModule.get(node.moduleId);
+      if (current === undefined || node.order < current.order) {
+        byModule.set(node.moduleId, {
+          id: node.moduleId,
+          path: node.modulePath || node.moduleId,
+          order: node.order,
+        });
+      }
+    });
+    var modules = Array.from(byModule.values()).sort(function (a, b) {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+
+    return {
+      nodeById: nodeById,
+      edges: edges,
+      used: used,
+      modules: modules,
+      danglingCount: edges.filter(function (edge) {
+        return edge.fromMissing || edge.toMissing;
+      }).length,
+    };
+  }
+
+  /**
+   * Mermaid 引号标签里的转义。
+   *
+   * `#` 必须最先处理：后面的转义会插入 `#quot;` 这类实体，若再替换 `#`
+   * 会把它们一起破坏。`<` / `>` 不转义时会被当成 HTML 标签吃掉（`List<int>`），
+   * `|` 是 flowchart 边标签的定界符，都要换成数字实体。
+   */
+  function mermaidLabel(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/&/g, "#38;")
+      .replace(/#/g, "#35;")
+      .replace(/"/g, "#quot;")
+      .replace(/</g, "#lt;")
+      .replace(/>/g, "#gt;")
+      .replace(/\|/g, "#124;")
+      .replace(/\r?\n/g, " ");
+  }
+
+  /**
+   * 时序图的参与者别名。
+   *
+   * 分号是 sequenceDiagram 的语句分隔符，`#` 会开启实体编码（`A#B` 会把
+   * 后面的文本吞掉），两者都换成全角字符：语义不变，也不会破坏语法。
+   * 冒号、引号、`&`、`<`、`|` 经 mermaid-cli 实测可以原样保留。
+   */
+  function mermaidSequenceAlias(value) {
+    var text = String(value === undefined || value === null ? "" : value)
+      .replace(/[\r\n]+/g, " ")
+      .replace(/;/g, "；")
+      .replace(/#/g, "＃")
+      .replace(/\s+/g, " ")
+      .trim();
+    return text.length === 0 ? "未命名" : text;
+  }
+
+  /** 时序图的消息文本与别名同一套替换：换行压平，`;` / `#` 换全角。 */
+  function mermaidSequenceText(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/\r?\n/g, " ")
+      .replace(/;/g, "；")
+      .replace(/#/g, "＃");
+  }
+
+  /**
+   * 部署交联图（flowchart）。
+   *
+   * 与 drawio 的矩形一一对应：每个参与模块固定两个节点 `<模块>-输出` /
+   * `<模块>-输入`，普通数据流画实线箭头，同信号关联画无箭头虚线。
+   * 模块 id 用序号而不是路径：路径里的点/斜杠/中文在 mermaid 里需要转义，
+   * 序号稳定且可读性由标签承担。
+   *
+   * 「流可悬空」时，缺端不能像 drawio 那样画一条没有终点的线：flowchart 的
+   * 连线语法要求两端都存在。这里用一个共享的 `void` 占位节点承接所有悬空端。
+   */
+  function buildMermaidFlow(flow, options) {
+    var graph = exportGraph(flow, options);
+    if (graph === null || graph.modules.length === 0) return "";
+
+    var hasDangling = graph.danglingCount > 0;
+    var lines = [
+      "flowchart LR",
+      "  classDef dcOut fill:#d5e8d4,stroke:#82b366,color:#1f1f1f",
+      "  classDef dcIn fill:#dae8fc,stroke:#6c8ebf,color:#1f1f1f",
+    ];
+    if (hasDangling) {
+      lines.push("  classDef dcVoid fill:#f5f5f5,stroke:#9d9d9d,color:#1f1f1f,stroke-dasharray: 4 3");
+    }
+    var boxByModule = new Map();
+    graph.modules.forEach(function (module, index) {
+      var base = "m" + (index + 1);
+      boxByModule.set(module.id, { out: base + "_out", in: base + "_in" });
+      lines.push("  " + base + '_out["' + mermaidLabel(module.path + "-输出") + '"]:::dcOut');
+      lines.push("  " + base + '_in["' + mermaidLabel(module.path + "-输入") + '"]:::dcIn');
+    });
+    if (hasDangling) {
+      lines.push('  void_node["void"]:::dcVoid');
+    }
+
+    graph.edges.forEach(function (edge) {
+      var fromNode = edge.fromMissing ? null : graph.nodeById.get(edge.from);
+      var toNode = edge.toMissing ? null : graph.nodeById.get(edge.to);
+      if (fromNode === undefined || toNode === undefined) return;
+      var source = "void_node";
+      var target = "void_node";
+      if (fromNode !== null) {
+        var fromBox = boxByModule.get(fromNode.moduleId);
+        if (fromBox === undefined) return;
+        source = fromNode.role === "in" ? fromBox.in : fromBox.out;
+      }
+      if (toNode !== null) {
+        var toBox = boxByModule.get(toNode.moduleId);
+        if (toBox === undefined) return;
+        target = toNode.role === "in" ? toBox.in : toBox.out;
+      }
+      var label = edge.label || "信号";
+      if (edge.kind === "same-signal") {
+        label = (edge.sharedDir === "in" ? "同读 · " : "同写 · ") + label;
+      }
+      var arrow = edge.kind === "same-signal" ? "-.-" : "-->";
+      lines.push("  " + source + " " + arrow + '|"' + mermaidLabel(label) + '"| ' + target);
+    });
+
+    return lines.join("\n");
+  }
+
+  /**
+   * 时序图（sequenceDiagram）。
+   *
+   * 程序集元数据没有运行时顺序，消息按模块树行号（`flow.edges` 已按
+   * fromIndex → toIndex 稳定排序）排列；`autonumber` 只表示阅读序号，
+   * 文档里必须写明这一点，避免被误读成真实调用时序。
+   *
+   * 悬空流的缺失一侧用 `void` 参与者占位：时序图的一条消息必须有发送方和
+   * 接收方，不能像 flowchart 那样只画半条线。
+   */
+  function buildMermaidSequence(flow, options) {
+    var graph = exportGraph(flow, options);
+    if (graph === null || graph.modules.length === 0) return "";
+
+    var hasDangling = graph.danglingCount > 0;
+    var lines = ["sequenceDiagram", "  autonumber"];
+    var participantByModule = new Map();
+    graph.modules.forEach(function (module, index) {
+      var pid = "P" + (index + 1);
+      participantByModule.set(module.id, pid);
+      lines.push("  participant " + pid + " as " + mermaidSequenceAlias(module.path));
+    });
+    if (hasDangling) lines.push("  participant PV as void");
+
+    graph.edges.forEach(function (edge) {
+      var fromNode = edge.fromMissing ? null : graph.nodeById.get(edge.from);
+      var toNode = edge.toMissing ? null : graph.nodeById.get(edge.to);
+      if (fromNode === undefined || toNode === undefined) return;
+      var fromPid = fromNode === null ? "PV" : participantByModule.get(fromNode.moduleId);
+      var toPid = toNode === null ? "PV" : participantByModule.get(toNode.moduleId);
+      if (fromPid === undefined || toPid === undefined) return;
+      var label = edge.label || "信号";
+      if (edge.kind === "same-signal") {
+        label = (edge.sharedDir === "in" ? "同读 · " : "同写 · ") + label;
+      }
+      var arrow = edge.kind === "same-signal" ? "-->>" : "->>";
+      lines.push("  " + fromPid + arrow + toPid + ": " + mermaidSequenceText(label));
+    });
+
+    return lines.join("\n");
+  }
+
+  /** Markdown 表格单元格：竖线必须转义，换行用 `<br>` 保留可读性。 */
+  function mdCell(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/\|/g, "\\|")
+      .replace(/\r?\n/g, "<br>");
+  }
+
+  /** Markdown 行内文本（标题、引用）：只去掉换行，避免标题被截断。 */
+  function mdInline(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/\r?\n/g, " ")
+      .trim();
+  }
+
+  function mdHeading(level) {
+    return new Array(Math.max(1, Math.min(6, level)) + 1).join("#");
+  }
+
+  /**
+   * 把信号的字段定义压平成一维行，供 Markdown 表格使用。
+   *
+   * 与 groupbox 的字段树同一套类型解析（`signalType` / `resolveFieldType`），
+   * 但不看展开状态：导出的是**完整定义**，不是屏幕上当前展开到的那几层。
+   * 类型环与深度上限沿用 `MAX_FIELD_DEPTH`，不会在自引用结构上无限递归。
+   */
+  function flattenSignalFields(ix, signal) {
+    var type = signalType(ix, signal);
+    if (type === null || (type.fields || []).length === 0) {
+      return { kind: "", rows: [] };
+    }
+
+    var rows = [];
+    walk(type, 0, "", [type.id]);
+
+    function walk(typeObj, depth, parentPath, chain) {
+      (typeObj.fields || []).forEach(function (field) {
+        var path = parentPath === "" ? field.name : parentPath + "/" + field.name;
+        var target = resolveFieldType(ix, field);
+        var targetType = target.type;
+        var canDescend = targetType !== null &&
+          (targetType.fields || []).length > 0 &&
+          chain.indexOf(targetType.id) < 0 &&
+          depth + 1 < MAX_FIELD_DEPTH;
+        var hasInitial = field.initial !== undefined && field.initial !== null && field.initial !== "";
+        rows.push({
+          depth: depth,
+          path: path,
+          typeName: targetType === null
+            ? (field.ctype || "")
+            : displayTypeName(target, field.ctype),
+          initialText: hasInitial ? String(field.initial) : "—",
+          offsetText: typeof field.offset === "number" && field.offset >= 0
+            ? String(field.offset) : "—",
+          sizeText: typeof field.size === "number" && field.size >= 0
+            ? String(field.size) : "—",
+        });
+        if (canDescend) walk(targetType, depth + 1, path, chain.concat([targetType.id]));
+      });
+    }
+
+    return { kind: String(type.kind || ""), rows: rows };
+  }
+
+  /**
+   * Markdown 导出：部署交联图 → 时序图 → 多层级模块标题下的信号定义表。
+   *
+   * 标题层级来自模块树本身（assembly → namespace → type），因此「多个层级
+   * 标题」不是硬编码的三层，而是跟随当前程序集的实际层级；超过 6 级时
+   * Markdown 只支持到 6 级，多余的层级压平在 `######` 下。
+   * 每个模块下的表只列**参与本次导出流**的信号，方向取该模块上的端口角色。
+   */
+  function buildMarkdownReport(model, flow, options) {
+    options = options || {};
+    var graph = exportGraph(flow, options);
+    if (graph === null || graph.modules.length === 0) return "";
+
+    var ix = getIndex(model);
+    var info = (model && model.info) || {};
+    var name = options.title || info.path || "程序集";
+    var facts = [];
+    if (info.arch) facts.push(String(info.arch));
+    if (info.kind) facts.push(String(info.kind));
+    if (info.format) facts.push(String(info.format));
+
+    // 模块 → (信号 → { signal, dirs })。同一个信号可能在多个模块上各有端口，
+    // 按模块分开列，才能说清「这个模块在本程序集里是读它还是写它」。
+    var byModule = new Map();
+    graph.used.forEach(function (nodeId) {
+      var node = graph.nodeById.get(nodeId);
+      if (node === undefined) return;
+      var parsed = parsePortKey(node.portKey || node.nodeId);
+      if (parsed === null) return;
+      var signal = ix.signalById.get(parsed.signalId);
+      if (signal === undefined) return;
+      var entry = byModule.get(node.moduleId);
+      if (entry === undefined) {
+        entry = new Map();
+        byModule.set(node.moduleId, entry);
+      }
+      var record = entry.get(signal.id);
+      if (record === undefined) {
+        record = { signal: signal, dirs: {} };
+        entry.set(signal.id, record);
+      }
+      if (node.role === "in") record.dirs.in = true;
+      else record.dirs.out = true;
+    });
+
+    // 按模块链建树：同一层的模块只出现一次，标题跟随程序集层级自然嵌套。
+    var root = { children: new Map() };
+    graph.modules.forEach(function (module) {
+      var cursor = root;
+      moduleChain(model, module.id).forEach(function (moduleId) {
+        var child = cursor.children.get(moduleId);
+        if (child === undefined) {
+          child = {
+            id: moduleId,
+            name: moduleNameOf(ix, moduleId),
+            path: modulePathOf(ix, moduleId),
+            children: new Map(),
+            signals: byModule.get(moduleId) || null,
+          };
+          cursor.children.set(moduleId, child);
+        }
+        cursor = child;
+      });
+    });
+
+    var lines = [];
+    lines.push("# " + mdInline(name) + " 模块交联");
+    lines.push("");
+    lines.push(
+      "> 由 Drawcode 程序集视图导出。" +
+      (facts.length > 0 ? " 程序集：" + facts.join(" / ") + "。" : "") +
+      " 导出范围：" + graph.modules.length + " 个模块、" + graph.edges.length + " 条信号流。" +
+      (graph.danglingCount > 0
+        ? " 其中悬空流 " + graph.danglingCount + " 条（对侧未勾选，未创建对侧模块）。"
+        : ""),
+    );
+    lines.push("");
+    lines.push("## 部署交联图");
+    lines.push("");
+    lines.push("```mermaid");
+    lines.push(buildMermaidFlow(flow, options));
+    lines.push("```");
+    lines.push("");
+    lines.push("## 时序图");
+    lines.push("");
+    lines.push(
+      "> 程序集元数据不包含运行时时序；消息顺序按模块树当前阅读顺序排列，" +
+      "同一组端点的多条信号按行号稳定排序。",
+    );
+    lines.push("");
+    lines.push("```mermaid");
+    lines.push(buildMermaidSequence(flow, options));
+    lines.push("```");
+    lines.push("");
+    lines.push("## 信号定义");
+
+    function directionText(dirs) {
+      var parts = [];
+      if (dirs.out) parts.push("输出");
+      if (dirs.in) parts.push("输入");
+      return parts.length === 0 ? "—" : parts.join("、");
+    }
+
+    function emitSignalTables(node, level) {
+      var records = Array.from(node.signals.values()).sort(function (a, b) {
+        var an = a.signal.name || a.signal.id;
+        var bn = b.signal.name || b.signal.id;
+        if (an !== bn) return an < bn ? -1 : 1;
+        return a.signal.id < b.signal.id ? -1 : a.signal.id > b.signal.id ? 1 : 0;
+      });
+
+      lines.push("");
+      if (node.path) lines.push("> 模块：`" + mdInline(node.path).replace(/`/g, "'") + "`");
+      lines.push("");
+      lines.push("| 信号 | 别名 | 方向 | 类型 | 单位 | 初值 | 标签 | 说明 |");
+      lines.push("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |");
+      records.forEach(function (record) {
+        var s = record.signal;
+        lines.push("| " + [
+          mdCell(s.name || s.id),
+          mdCell(s.alias || "—"),
+          directionText(record.dirs),
+          mdCell(s.ctype || "—"),
+          mdCell(s.unit || "—"),
+          mdCell(s.initial === undefined || s.initial === null || s.initial === ""
+            ? "—" : s.initial),
+          mdCell((s.tags || []).join("、") || "—"),
+          mdCell(s.note || "—"),
+        ].join(" | ") + " |");
+      });
+
+      // 结构/枚举信号额外给一张字段定义表，对齐 groupbox 的「信号定义表」语义。
+      records.forEach(function (record) {
+        var fields = flattenSignalFields(ix, record.signal);
+        if (fields.rows.length === 0) return;
+        var isEnum = fields.kind === "enum";
+        lines.push("");
+        lines.push(
+          "**" + mdInline(record.signal.name || record.signal.id) +
+          (isEnum ? " 枚举定义**" : " 字段定义**"),
+        );
+        lines.push("");
+        if (isEnum) {
+          lines.push("| 序号 | 成员 | 值 |");
+          lines.push("| ---: | :--- | :--- |");
+          fields.rows.forEach(function (row, index) {
+            lines.push("| " + (index + 1) + " | " + mdCell(row.path) +
+              " | " + mdCell(row.initialText) + " |");
+          });
+        } else {
+          lines.push("| 序号 | 字段 | 类型 | 初值 | 偏移 | 大小 |");
+          lines.push("| ---: | :--- | :--- | :--- | ---: | ---: |");
+          fields.rows.forEach(function (row, index) {
+            lines.push("| " + (index + 1) + " | " + mdCell(row.path) +
+              " | " + mdCell(row.typeName || "—") +
+              " | " + mdCell(row.initialText) +
+              " | " + mdCell(row.offsetText) +
+              " | " + mdCell(row.sizeText) + " |");
+          });
+        }
+      });
+    }
+
+    function emitModule(node, level) {
+      var heading = Math.min(level, 6);
+      lines.push("");
+      lines.push(mdHeading(heading) + " " + mdInline(node.name || node.path || node.id));
+      if (node.signals !== null) emitSignalTables(node, heading);
+      node.children.forEach(function (child) { emitModule(child, level + 1); });
+    }
+
+    root.children.forEach(function (child) { emitModule(child, 3); });
+    lines.push("");
+
+    return lines.join("\n");
+  }
+
   /**
    * 给一组竖直区间（连线两端 y 坐标）分配互不重叠的横向车道。
    *
@@ -2891,6 +3356,11 @@
     getPorts: getPorts,
     buildCascade: buildCascade,
     buildPortFlow: buildPortFlow,
+    exportGraph: exportGraph,
+    buildMermaidFlow: buildMermaidFlow,
+    buildMermaidSequence: buildMermaidSequence,
+    buildMarkdownReport: buildMarkdownReport,
+    flattenSignalFields: flattenSignalFields,
     assignWireLanes: assignWireLanes,
     treeGuides: treeGuides,
     facetGroups: facetGroups,

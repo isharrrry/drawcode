@@ -125,6 +125,8 @@ body {
   color: var(--vscode-foreground);
   cursor: pointer;
   font-size: inherit;
+  /* 导出/筛选按钮变多后，窄栏里让文字整体换行会把 30px 的 pane-head 撑破。 */
+  white-space: nowrap;
 }
 
 .ghost-button:hover {
@@ -538,6 +540,23 @@ body {
   line-height: 14px;
   color: var(--vscode-badge-foreground);
   background: var(--vscode-badge-background);
+}
+
+/*
+ * 表头右侧的导出条：勾选「流可悬空」→ 格式下拉框 → 导出按钮。
+ * 表头只有 30px 高，控件必须单行；列被拖窄时先压缩标题（flex:1），
+ * 操作区保持可点。
+ */
+.cascade-head-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.cascade-head-actions .export-select {
+  max-width: 96px;
 }
 
 .cascade-body {
@@ -1446,6 +1465,19 @@ body {
   background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
   font-family: var(--vscode-editor-font-family);
   font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* 安装命令要保留换行与缩进，但用正文样式，避免被当成错误堆栈。 */
+.error-hint {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  margin-top: 8px;
+  background: var(--vscode-textCodeBlock-background, rgba(127, 127, 127, 0.1));
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 12px;
   white-space: pre-wrap;
 }
 

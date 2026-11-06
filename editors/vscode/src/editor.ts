@@ -9,7 +9,8 @@
  * webview 与宿主之间的消息方向：
  *   宿主 → webview：loading / init / slice / filterResult / error / groupingSaved
  *   webview → 宿主：ready / reload / forceLoad / requestNode / select / filter /
- *                   saveGrouping / openDefault / copy
+ *                   saveGrouping / exportDrawio / exportMermaid / exportMarkdown /
+ *                   openDefault / copy
  *
  * 模型默认整份下发；信号 + 函数超过 `drawcode.artifactSliceThreshold`
  * （默认 2000）时改走切片：init 只发模块骨架、类型、诊断与计数，其余实体由
@@ -26,6 +27,8 @@ import * as vscode from "vscode";
 import {
   ArtifactTooLargeError,
   CoreUnavailableError,
+  DOTNET_DOWNLOAD_URL,
+  DotnetUnavailableError,
   InspectFailedError,
   loadArtifactModel,
   readSettings,
@@ -34,6 +37,12 @@ import { createModelSlicer, type ModelSlicer, type ModelTotals } from "./slicer"
 import type { ArtifactModel } from "./types";
 
 export const VIEW_TYPE = "drawcode.artifact";
+
+/**
+ * 同一个缺 .NET 错误可能在打开多个标签时反复出现；60 秒内只弹一次通知，
+ * 页面内的错误卡片仍然每次都会显示（那才是用户当前操作的反馈）。
+ */
+let dotnetNoticeAt = 0;
 
 /**
  * webview 完成 init 后的回执。
@@ -242,6 +251,28 @@ function errorCode(error: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
+/**
+ * 缺 .NET 时弹一次通知，提供“安装说明”和“重新检查”。
+ *
+ * 页面里的错误卡片才是主入口；通知负责在用户切到别的标签后仍能看到，
+ * 并让“装完回来点一下”不必重新打开文件。
+ */
+function notifyDotnetUnavailable(error: DotnetUnavailableError, retry: () => void): void {
+  const now = Date.now();
+  if (now - dotnetNoticeAt < 60_000) return;
+  dotnetNoticeAt = now;
+
+  void vscode.window
+    .showWarningMessage(`${error.title}：解析 .dll 需要 .NET 10+ 运行时。`, "安装说明", "重新检查")
+    .then((choice) => {
+      if (choice === "安装说明") {
+        void vscode.env.openExternal(vscode.Uri.parse(DOTNET_DOWNLOAD_URL));
+      } else if (choice === "重新检查") {
+        retry();
+      }
+    });
+}
+
 interface LoadedGrouping {
   path: string;
   config: GroupingConfig | null;
@@ -344,8 +375,12 @@ export class ArtifactEditorProvider implements vscode.CustomReadonlyEditorProvid
     // 同一面板可能连续触发 ready/reload/forceLoad；用代号丢弃过期结果，
     // 否则慢的旧解析会覆盖快的新解析。
     let generation = 0;
+    // 通知里的“重新检查”可能在标签关闭之后才被点击；关掉后再 post 会得到
+    // 一个被拒绝的 Promise，界面上则是无意义的报错。
+    let disposed = false;
 
     const post = (message: unknown): void => {
+      if (disposed) return;
       void webview.postMessage(message);
     };
 
@@ -387,6 +422,11 @@ export class ArtifactEditorProvider implements vscode.CustomReadonlyEditorProvid
         });
       } catch (error) {
         if (mine !== generation || token.isCancellationRequested) return;
+        if (error instanceof DotnetUnavailableError) {
+          notifyDotnetUnavailable(error, () => {
+            if (!disposed) void load();
+          });
+        }
         post(describeError(error));
       }
     };
@@ -399,6 +439,7 @@ export class ArtifactEditorProvider implements vscode.CustomReadonlyEditorProvid
     handles.set(key, handle);
 
     panel.onDidDispose(() => {
+      disposed = true;
       generation += 1;
       if (handles.get(key) === handle) handles.delete(key);
       // 面板关闭后回执不再有意义；留着会让「关掉再开」的测试读到上一份模型。
@@ -417,6 +458,7 @@ export class ArtifactEditorProvider implements vscode.CustomReadonlyEditorProvid
       totals?: unknown;
       config?: unknown;
       xml?: unknown;
+      content?: unknown;
       fileName?: unknown;
     }) => {
       switch (message.type) {
@@ -483,9 +525,27 @@ export class ArtifactEditorProvider implements vscode.CustomReadonlyEditorProvid
         case "exportDrawio":
           void exportDrawio(document.uri, message.xml, message.fileName);
           break;
+        case "exportMermaid":
+          void exportText(document.uri, message.content, message.fileName, {
+            suffix: ".mmd",
+            label: "Mermaid",
+            filterName: "Mermaid 图",
+          });
+          break;
+        case "exportMarkdown":
+          void exportText(document.uri, message.content, message.fileName, {
+            suffix: ".md",
+            label: "Markdown",
+            filterName: "Markdown 文档",
+          });
+          break;
         case "openDefault":
           // "default" 是 VS Code 的内置 viewType：用文件默认编辑器（文本/二进制）打开。
           void vscode.commands.executeCommand("vscode.openWith", document.uri, "default");
+          break;
+        case "openDotnetDownload":
+          // 地址固定在宿主侧：webview 只能请求“打开 .NET 下载页”，不能传任意 URL。
+          void vscode.env.openExternal(vscode.Uri.parse(DOTNET_DOWNLOAD_URL));
           break;
         case "copy": {
           const text = typeof message.text === "string" ? message.text : "";
@@ -520,25 +580,67 @@ async function exportDrawio(
     return;
   }
 
+  await saveExportText(documentUri, xml, fileNameValue, {
+    suffix: ".drawio",
+    label: "draw.io",
+    filterName: "draw.io 图",
+  });
+}
+
+/** 三种文本导出共用的落盘参数。 */
+interface ExportTextSpec {
+  suffix: ".drawio" | ".mmd" | ".md";
+  label: string;
+  filterName: string;
+}
+
+/**
+ * 导出 Mermaid（.mmd）与 Markdown（.md）。
+ *
+ * webview 只负责生成正文，宿主只负责校验非空、清洗建议文件名并让用户确认路径。
+ * 内容格式不在宿主侧解析：mermaid 语法由文档工具校验，宿主再解析一遍只会
+ * 多一份会漂移的实现。
+ */
+async function exportText(
+  documentUri: vscode.Uri,
+  contentValue: unknown,
+  fileNameValue: unknown,
+  spec: ExportTextSpec,
+): Promise<void> {
+  const content = typeof contentValue === "string" ? contentValue : "";
+  if (content.trim().length === 0) {
+    void vscode.window.showErrorMessage(`导出失败：没有收到有效的 ${spec.label} 内容`);
+    return;
+  }
+  await saveExportText(documentUri, content, fileNameValue, spec);
+}
+
+/** 保存对话框 + 写文件 + “打开”后续动作。文件名只接受 basename 级建议值。 */
+async function saveExportText(
+  documentUri: vscode.Uri,
+  content: string,
+  fileNameValue: unknown,
+  spec: ExportTextSpec,
+): Promise<void> {
   const base = path.basename(documentUri.fsPath);
   let suggested = typeof fileNameValue === "string" ? fileNameValue : "";
   suggested = suggested.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").trim();
   if (suggested.length === 0) suggested = base;
-  if (!suggested.toLowerCase().endsWith(".drawio")) suggested += ".drawio";
+  if (!suggested.toLowerCase().endsWith(spec.suffix)) suggested += spec.suffix;
   if (suggested.length > 120) suggested = suggested.slice(0, 120);
 
   const target = await vscode.window.showSaveDialog({
     defaultUri: vscode.Uri.file(path.join(path.dirname(documentUri.fsPath), suggested)),
-    filters: { "draw.io 图": ["drawio"] },
+    filters: { [spec.filterName]: [spec.suffix.slice(1)] },
     saveLabel: "导出",
   });
   if (target === undefined) return;
 
   try {
-    await fs.writeFile(target.fsPath, xml, "utf8");
+    await fs.writeFile(target.fsPath, content, "utf8");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    void vscode.window.showErrorMessage(`导出 draw.io 失败：${message}`);
+    void vscode.window.showErrorMessage(`导出 ${spec.label} 失败：${message}`);
     return;
   }
 
@@ -553,15 +655,26 @@ async function exportDrawio(
 
 function describeError(error: unknown): {
   type: "error";
-  kind: "tooLarge" | "coreMissing" | "inspect" | "unknown";
+  kind: "tooLarge" | "coreMissing" | "inspect" | "dotnetMissing" | "unknown";
   message: string;
   detail: string;
+  /** 普通正文形式的可操作说明（目前只有缺 .NET 用）。 */
+  hint?: string;
 } {
   if (error instanceof ArtifactTooLargeError) {
     return { type: "error", kind: "tooLarge", message: error.message, detail: "" };
   }
   if (error instanceof CoreUnavailableError) {
     return { type: "error", kind: "coreMissing", message: error.message, detail: "" };
+  }
+  if (error instanceof DotnetUnavailableError) {
+    return {
+      type: "error",
+      kind: "dotnetMissing",
+      message: error.title,
+      detail: "",
+      hint: error.hint,
+    };
   }
   if (error instanceof InspectFailedError) {
     return { type: "error", kind: "inspect", message: error.message, detail: error.detail };
@@ -678,14 +791,29 @@ function renderHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
           <button class="ghost-button small" id="group-delete" type="button" title="删除当前选中的配置">删除配置</button>
           <span class="groupbar-hint" id="group-hint"></span>
         </div>
+        <!--
+          导出条挂在「模块 / 信号端口」表头右侧：导出的是这棵树里勾选的端口，
+          放在 groupbox 表头会让人误以为导出字段。由 CascadeView 在每次重建
+          表头时接管；模型到达前保持 hidden，避免临时浮在树容器顶部。
+        -->
+        <span class="cascade-head-actions" id="cascade-head-actions" hidden>
+          <label class="toggle" title="勾选后，只导出实际勾选的一侧；对侧模块不创建，必须在两端存在的格式用 void 节点占位">
+            <input type="checkbox" id="allow-dangling" /> 流可悬空
+          </label>
+          <select class="facet export-select" id="export-type" title="选择导出格式">
+            <option value="drawio">Drawio</option>
+            <option value="mermaid">Mermaid</option>
+            <option value="markdown">Markdown</option>
+          </select>
+          <button class="ghost-button small" id="export-button" type="button"
+                  title="把当前勾选的模块与信号按所选格式导出">导出</button>
+        </span>
         <div class="cascade-scroll" id="cascade" tabindex="0"></div>
       </div>
       <div class="vsplitter" id="splitter-group" role="separator" aria-orientation="vertical" title="拖动调整模块树与 groupbox 的宽度比例"></div>
       <div class="group-pane" id="group-pane">
         <div class="pane-head">
           <span class="pane-head-title">信号 Groupbox</span>
-          <button class="ghost-button small" id="export-drawio" type="button"
-                  title="把当前勾选的模块与信号导出为 draw.io 文件">导出 Drawio</button>
           <span class="pane-count" id="group-count"></span>
         </div>
         <div class="group-scroll" id="group-host"></div>

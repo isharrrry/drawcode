@@ -38,6 +38,9 @@
   function CascadeView(host, handlers) {
     this.host = host;
     this.handlers = handlers || {};
+    // 表头右侧的扩展槽（导出条）。宿主只交过来一个节点，这里每次重建
+    // 表头时把它搬进新表头，不关心里面有哪些控件。
+    this.headActions = this.handlers.headActions || null;
     this.data = null;
     this.selectedKey = null;
     this.rowMap = new Map();
@@ -143,6 +146,7 @@
     var title = el("span", "cascade-head-title", "模块 / 信号端口");
     head.appendChild(title);
     head.appendChild(el("span", "cascade-head-count", String(data.portCount)));
+    if (this.headActions !== null) head.appendChild(this.headActions);
 
     var body = el("div", "cascade-body");
     body.style.height = bodyHeight + "px";

@@ -22,7 +22,7 @@ import { parentPort, workerData } from "node:worker_threads";
 interface ArtifactCore {
   readArtifact(
     file: string,
-    options: { inferEdges?: boolean; metadataToolPath?: string },
+    options: { inferEdges?: boolean; metadataToolPath?: string; dotnetPath?: string },
   ): Promise<unknown>;
   canonicalArtifactJson(model: unknown): string;
 }
@@ -32,6 +32,8 @@ interface CoreRequest {
   inferEdges: boolean;
   /** sidecar 的绝对路径；找不到时由主线程留空，核心会退回环境变量或给诊断。 */
   metadataToolPath?: string;
+  /** `dotnet` 的显式路径；空串表示由核心自动查找。 */
+  dotnetPath?: string;
 }
 
 /**
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
     const model = await core.readArtifact(request.file, {
       inferEdges: request.inferEdges,
       metadataToolPath: request.metadataToolPath,
+      dotnetPath: request.dotnetPath,
     });
     // 模型与规范 JSON 一起回传：宿主既要渲染模型，也要支持「复制 JSON」，
     // 两份在 worker 里一次算好比回传模型后再在宿主里重新规范一遍更省事。

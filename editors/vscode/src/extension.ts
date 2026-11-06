@@ -17,7 +17,12 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { ARTIFACT_FILTERS } from "./artifactFilters";
-import { loadArtifactModel, readSettings } from "./modelLoader";
+import {
+  DOTNET_DOWNLOAD_URL,
+  DotnetUnavailableError,
+  loadArtifactModel,
+  readSettings,
+} from "./modelLoader";
 import { registerSourceDiagramCommands } from "./sourceDiagram";
 import { registerArtifactTree } from "./tree";
 import {
@@ -93,6 +98,17 @@ export function activate(context: vscode.ExtensionContext): DrawcodeApi {
         } catch (error) {
           // 用户关掉进度通知 = 取消，不是失败；弹红条只会让人以为出错了。
           if (error instanceof Error && error.name === "AbortError") return;
+          if (error instanceof DotnetUnavailableError) {
+            // 命令面板没有页面可以承载完整说明，至少给一个能点的安装入口。
+            const action = await vscode.window.showWarningMessage(
+              `${error.title}：解析 .dll 需要 .NET 10+ 运行时。`,
+              "安装说明",
+            );
+            if (action === "安装说明") {
+              await vscode.env.openExternal(vscode.Uri.parse(DOTNET_DOWNLOAD_URL));
+            }
+            return;
+          }
           void vscode.window.showErrorMessage(
             error instanceof Error ? error.message : String(error),
           );

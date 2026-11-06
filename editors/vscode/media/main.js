@@ -55,9 +55,12 @@
     splitterGroup: document.getElementById("splitter-group"),
     hsplitter: document.getElementById("hsplitter"),
     cascadeHost: document.getElementById("cascade"),
+    headActions: document.getElementById("cascade-head-actions"),
     groupHost: document.getElementById("group-host"),
     groupCount: document.getElementById("group-count"),
-    exportDrawio: document.getElementById("export-drawio"),
+    allowDangling: document.getElementById("allow-dangling"),
+    exportType: document.getElementById("export-type"),
+    exportButton: document.getElementById("export-button"),
     wireInfo: document.getElementById("wire-info"),
     treeInfo: document.getElementById("tree-info"),
     groupInfo: document.getElementById("group-info"),
@@ -146,6 +149,14 @@
       : null,
     selectedEdgeKey: null,
 
+    // ── 导出 ──
+    // 导出格式记在状态里：界面只有一个下拉框 + 一个按钮，不再占三颗按钮。
+    // `allowDangling` 默认关：保持“自动补出对侧模块”的旧行为。
+    exportType: saved.exportType === "mermaid" || saved.exportType === "markdown"
+      ? saved.exportType
+      : "drawio",
+    allowDangling: restored && saved.allowDangling === true,
+
     // ── 工具栏形态 ──
     // 默认收纳：只留搜索、属性筛选与分组开关一行。高级开关与批量展开
     // 收进 toolbar-advanced，需要时由用户手动展开。
@@ -218,6 +229,8 @@
       groupIndexWidth: state.groupIndexWidth,
       selectedRowKey: state.selectedRowKey,
       selectedGroupKey: state.selectedGroupKey,
+      exportType: state.exportType,
+      allowDangling: state.allowDangling,
       toolbarExpanded: state.toolbarExpanded,
       groupEnabled: state.groupEnabled,
       groupLevels: state.groupLevels,
@@ -366,6 +379,9 @@
   // ── 视图装配 ───────────────────────────────────────────────────────────
 
   var cascadeView = new globalThis.CascadeView(dom.cascadeHost, {
+    // 导出条挂在「模块 / 信号端口」表头右侧：它服务的是这棵树里的勾选，
+    // 放在 groupbox 的表头会让人以为导出的是字段。
+    headActions: dom.headActions,
     onSelect: selectRow,
     onCheck: checkRow,
     onExpand: expandRow,
@@ -465,6 +481,9 @@
     }
 
     cascadeView.setData(cascade, { selectedKey: state.selectedRowKey });
+    // 表头由 CascadeView 每次重建，导出条在第一次 layout 后才有落脚点。
+    // 在那之前保持 hidden，避免它临时浮在树容器顶部。
+    dom.headActions.hidden = false;
     groupView.setData(cascade.groups, {
       selectedKey: state.selectedGroupKey,
       indexWidth: state.groupIndexWidth,
@@ -718,12 +737,13 @@
     renderStatus();
   }
 
-  // ── 导出 draw.io ───────────────────────────────────────────────────────
+  // ── 导出 Drawio / Mermaid / Markdown ───────────────────────────────────
   //
   // 导出不重新解析模型，而是复用当前这帧的 `flow`：
   //   - 用户看到什么就导出什么，不会因为折叠/过滤状态不同而变一张图；
   //   - 模块按当前树行号排序，矩形从上往下排，和左侧模块树阅读顺序一致；
   //   - 每个模块拆成「输出」「输入」两个矩形，信号作为连线标签。
+  //   - Mermaid / Markdown 的纯数据生成在 `logic.js`，本文件只负责取名字、发消息。
 
   function xmlEscape(value) {
     return String(value === undefined || value === null ? "" : value)
@@ -735,38 +755,15 @@
   }
 
   function buildDrawioXml() {
-    if (flow === null) return null;
-    var nodeById = new Map();
-    (flow.nodes || []).forEach(function (node) { nodeById.set(node.nodeId, node); });
-
-    var edges = (flow.edges || []).filter(function (edge) {
-      return nodeById.has(edge.from) && nodeById.has(edge.to);
-    });
-    var used = new Set();
-    edges.forEach(function (edge) {
-      used.add(edge.from);
-      used.add(edge.to);
-    });
-    // 没有连线时仍把勾选的模块画出来：用户可能只想导出模块清单。
-    if (used.size === 0) {
-      (flow.nodes || []).forEach(function (node) { used.add(node.nodeId); });
-    }
-
-    var orderByModule = new Map();
-    used.forEach(function (nodeId) {
-      var node = nodeById.get(nodeId);
-      if (node === undefined) return;
-      var current = orderByModule.get(node.moduleId);
-      if (current === undefined || node.order < current.order) {
-        orderByModule.set(node.moduleId, { order: node.order, path: node.modulePath });
-      }
-    });
-    var modules = Array.from(orderByModule.keys()).sort(function (a, b) {
-      var A = orderByModule.get(a);
-      var B = orderByModule.get(b);
-      if (A.order !== B.order) return A.order - B.order;
-      return A.path < B.path ? -1 : A.path > B.path ? 1 : 0;
-    });
+    // 节点的裁剪与模块排序统一由 logic.exportGraph 决定：drawio / mmd / md
+    // 三种导出必须对「哪些模块参与」给出同一个答案。
+    // draw.io 的边允许只有一端，悬空端用 targetPoint / sourcePoint 固定落点，
+    // 所以这里不需要像 mermaid 那样造 void 节点。
+    var graph = D.exportGraph(flow, { allowDangling: state.allowDangling });
+    if (graph === null) return null;
+    var nodeById = graph.nodeById;
+    var edges = graph.edges;
+    var modules = graph.modules;
 
     var ROW_H = 120;
     var BOX_W = 250;
@@ -775,12 +772,12 @@
     var IN_X = 430;
     var TOP = 60;
     var boxByModule = new Map();
+    var laneYByModule = new Map();
     var cells = [];
     var idSeq = 0;
 
-    function addBox(moduleId, dir, lane) {
-      var info = orderByModule.get(moduleId);
-      var name = (info.path || moduleId) + (dir === "out" ? "-输出" : "-输入");
+    function addBox(module, dir, lane) {
+      var name = (module.path || module.id) + (dir === "out" ? "-输出" : "-输入");
       var id = "dc-box-" + (idSeq += 1);
       var style = [
         "rounded=0",
@@ -803,31 +800,42 @@
       return id;
     }
 
-    modules.forEach(function (moduleId, index) {
-      var lane = { y: TOP + index * ROW_H };
-      boxByModule.set(moduleId + "|out", addBox(moduleId, "out", lane));
-      boxByModule.set(moduleId + "|in", addBox(moduleId, "in", lane));
+    modules.forEach(function (module, index) {
+      var y = TOP + index * ROW_H;
+      laneYByModule.set(module.id, y);
+      boxByModule.set(module.id + "|out", addBox(module, "out", { y: y }));
+      boxByModule.set(module.id + "|in", addBox(module, "in", { y: y }));
     });
 
     var outSeq = new Map();
     var inSeq = new Map();
     edges.forEach(function (edge, index) {
-      var fromNode = nodeById.get(edge.from);
-      var toNode = nodeById.get(edge.to);
+      // 「流可悬空」：context 对端不建矩形，只留一条单端线。
+      var fromNode = edge.fromMissing ? null : nodeById.get(edge.from);
+      var toNode = edge.toMissing ? null : nodeById.get(edge.to);
       if (fromNode === undefined || toNode === undefined) return;
 
-      var fromKey = fromNode.moduleId + "|" + (fromNode.role === "in" ? "in" : "out");
-      var toKey = toNode.moduleId + "|" + (toNode.role === "in" ? "in" : "out");
-      var source = boxByModule.get(fromKey);
-      var target = boxByModule.get(toKey);
-      if (source === undefined || target === undefined) return;
+      var source = null;
+      var target = null;
+      if (fromNode !== null) {
+        source = boxByModule.get(
+          fromNode.moduleId + "|" + (fromNode.role === "in" ? "in" : "out"),
+        );
+        if (source === undefined) return;
+      }
+      if (toNode !== null) {
+        target = boxByModule.get(
+          toNode.moduleId + "|" + (toNode.role === "in" ? "in" : "out"),
+        );
+        if (target === undefined) return;
+      }
 
       // 同一矩形上可能挂多条线：在边的 25%/50%/75% 处错开端口，
       // 比全部挤在中点更容易看出有几条信号。
-      var oi = outSeq.get(source) || 0;
-      outSeq.set(source, oi + 1);
-      var ii = inSeq.get(target) || 0;
-      inSeq.set(target, ii + 1);
+      var oi = source === null ? 0 : (outSeq.get(source) || 0);
+      if (source !== null) outSeq.set(source, oi + 1);
+      var ii = target === null ? 0 : (inSeq.get(target) || 0);
+      if (target !== null) inSeq.set(target, ii + 1);
       var exitY = 0.25 + (oi % 3) * 0.25;
       var entryY = 0.25 + (ii % 3) * 0.25;
 
@@ -835,14 +843,14 @@
       //   - 输出框从右侧出、右侧进，走图形外圈；
       //   - 输入框从左侧出、左侧进。
       // 普通数据流仍按「输出框右侧 → 输入框左侧」连接。
-      var sameDir = fromNode.role === toNode.role;
+      var sameDir = fromNode !== null && toNode !== null && fromNode.role === toNode.role;
       var exitX = sameDir && fromNode.role === "in" ? 0 : 1;
       var entryX = sameDir && toNode.role === "out" ? 1 : 0;
 
       // 同向关联线没有方向：draw.io 里也不能带箭头，否则「输出→输出」看起来
       // 像一条画反了的数据流。用 `endArrow=none` + 虚线表达「共享同一信号」。
       var sameSignal = edge.kind === "same-signal";
-      var style = [
+      var styleParts = [
         "edgeStyle=orthogonalEdgeStyle",
         "curved=1",
         "rounded=1",
@@ -853,25 +861,42 @@
         "fontSize=11",
         "strokeColor=" + (edge.color || "#6c8ebf"),
         edge.kind === "same-signal" ? "dashed=1" : "",
-        "exitX=" + exitX,
-        "exitY=" + exitY,
-        "exitDx=0",
-        "exitDy=0",
-        "entryX=" + entryX,
-        "entryY=" + entryY,
-        "entryDx=0",
-        "entryDy=0",
-      ].filter(function (part) { return part.length > 0; }).join(";");
+      ];
+      // 悬空端没有矩形可挂，exit*/entry* 约束只写给实际存在的那一端。
+      if (source !== null) {
+        styleParts.push("exitX=" + exitX, "exitY=" + exitY, "exitDx=0", "exitDy=0");
+      }
+      if (target !== null) {
+        styleParts.push("entryX=" + entryX, "entryY=" + entryY, "entryDx=0", "entryDy=0");
+      }
+      var style = styleParts.filter(function (part) { return part.length > 0; }).join(";");
 
       var label = edge.label || "信号";
       if (edge.kind === "same-signal") {
         // out↔out 是两边都在写，in↔in 是两边都在读。
-        label = (fromNode.role === "in" ? "同读 · " : "同写 · ") + label;
+        label = (edge.sharedDir === "in" ? "同读 · " : "同写 · ") + label;
       }
+
+      // draw.io 的悬空边需要一个固定的自由端点，否则无终端的边可能不显示。
+      // 输出侧悬空落在输入列右侧的空白处，输入侧悬空落在输出列左侧的空白处。
+      var geometry = '<mxGeometry relative="1" as="geometry"/>';
+      if (target === null) {
+        var targetY = (laneYByModule.get(fromNode.moduleId) || TOP) + BOX_H / 2;
+        geometry = '<mxGeometry relative="1" as="geometry"><mxPoint x="' +
+          (IN_X + BOX_W + 40) + '" y="' + targetY + '" as="targetPoint"/></mxGeometry>';
+      } else if (source === null) {
+        var sourceY = (laneYByModule.get(toNode.moduleId) || TOP) + BOX_H / 2;
+        geometry = '<mxGeometry relative="1" as="geometry"><mxPoint x="' +
+          (OUT_X - 40) + '" y="' + sourceY + '" as="sourcePoint"/></mxGeometry>';
+      }
+
+      var ends = "";
+      if (source !== null) ends += ' source="' + source + '"';
+      if (target !== null) ends += ' target="' + target + '"';
       cells.push(
         '<mxCell id="dc-edge-' + (index + 1) + '" value="' + xmlEscape(label) +
-          '" style="' + style + '" edge="1" parent="1" source="' + source +
-          '" target="' + target + '"><mxGeometry relative="1" as="geometry"/></mxCell>',
+          '" style="' + style + '" edge="1" parent="1"' + ends + '>' +
+          geometry + "</mxCell>",
       );
     });
 
@@ -895,25 +920,75 @@
     ].join("\n");
   }
 
-  function exportDrawio() {
+  /** 导出文件名前缀：程序集 basename，取不到时退回「模块交联」。 */
+  function exportBaseName() {
+    return model && model.info && model.info.path
+      ? model.info.path.split(/[\\/]/).pop()
+      : "模块交联";
+  }
+
+  /** 三种导出共用的前置检查：没有勾选或没有模型时只更新状态栏，不发消息。 */
+  function hasExportableFlow() {
     if (flow === null || flow.nodes.length === 0) {
-      setStatus("先在模块树里勾选端口，再导出 Drawio");
-      return;
+      setStatus("先在模块树里勾选端口，再导出");
+      return false;
     }
+    return true;
+  }
+
+  function exportDrawio() {
+    if (!hasExportableFlow()) return;
     var xml = buildDrawioXml();
     if (xml === null) {
       setStatus("当前没有可导出的模块");
       return;
     }
-    var base = model && model.info && model.info.path
-      ? model.info.path.split(/[\\/]/).pop()
-      : "模块交联";
     vscode.postMessage({
       type: "exportDrawio",
       xml: xml,
-      fileName: base + "-模块交联.drawio",
+      fileName: exportBaseName() + "-模块交联.drawio",
     });
     setStatus("已生成 Drawio，请在保存对话框里选择位置");
+  }
+
+  function exportMermaid() {
+    if (!hasExportableFlow()) return;
+    var text = D.buildMermaidFlow(flow, { allowDangling: state.allowDangling });
+    if (text.length === 0) {
+      setStatus("当前没有可导出的模块");
+      return;
+    }
+    vscode.postMessage({
+      type: "exportMermaid",
+      content: text,
+      fileName: exportBaseName() + "-模块交联.mmd",
+    });
+    setStatus("已生成 Mermaid，请在保存对话框里选择位置");
+  }
+
+  function exportMarkdown() {
+    if (!hasExportableFlow()) return;
+    var text = D.buildMarkdownReport(model, flow, {
+      title: exportBaseName(),
+      allowDangling: state.allowDangling,
+    });
+    if (text.length === 0) {
+      setStatus("当前没有可导出的模块");
+      return;
+    }
+    vscode.postMessage({
+      type: "exportMarkdown",
+      content: text,
+      fileName: exportBaseName() + "-模块交联.md",
+    });
+    setStatus("已生成 Markdown，请在保存对话框里选择位置");
+  }
+
+  /** 表头「导出」按钮：格式由下拉框决定，三种生成器共用同一个入口。 */
+  function runExport() {
+    if (state.exportType === "mermaid") exportMermaid();
+    else if (state.exportType === "markdown") exportMarkdown();
+    else exportDrawio();
   }
 
   // ── 布局 ───────────────────────────────────────────────────────────────
@@ -2469,9 +2544,22 @@
     vscode.postMessage({ type: "reload" });
   });
 
-  if (dom.exportDrawio !== null) {
-    dom.exportDrawio.addEventListener("click", exportDrawio);
-  }
+  dom.allowDangling.checked = state.allowDangling;
+  dom.allowDangling.addEventListener("change", function () {
+    state.allowDangling = dom.allowDangling.checked;
+    save();
+    setStatus(state.allowDangling
+      ? "已开启「流可悬空」：导出只创建实际勾选的一侧"
+      : "已关闭「流可悬空」：导出会自动补出对侧模块");
+  });
+
+  dom.exportType.value = state.exportType;
+  dom.exportType.addEventListener("change", function () {
+    state.exportType = dom.exportType.value;
+    save();
+  });
+
+  dom.exportButton.addEventListener("click", runExport);
 
   dom.openDefault.addEventListener("click", function () {
     vscode.postMessage({ type: "openDefault" });
@@ -2519,12 +2607,33 @@
           "扩展自带的解析核心不完整。请重新安装 Drawcode Artifact Viewer；安装包已包含解析核心与 .NET sidecar。",
         ),
       );
+    } else if (message.kind === "dotnetMissing") {
+      card.appendChild(
+        el(
+          "div",
+          "info-section",
+          "解析 .dll 需要一个随扩展打包的 .NET sidecar，但目标机缺少 .NET 运行时。" +
+            "扩展不携带、也不裁剪运行时（保持安装包小，同一份 VSIX 可在 Windows / Linux 使用），" +
+            "所以需要在本机安装 .NET 10 或更高版本。",
+        ),
+      );
+      if (message.hint) {
+        card.appendChild(el("div", "error-hint", message.hint));
+      }
+      card.appendChild(
+        el(
+          "div",
+          "info-section",
+          "如果通过 Remote-SSH / WSL / Dev Container 打开，扩展运行在远端，请在远端安装；" +
+            "也可以在设置 drawcode.dotnetPath 中指定 dotnet 的路径。安装后点“重新检查”。",
+        ),
+      );
     } else if (message.kind === "inspect") {
       card.appendChild(
         el(
           "div",
           "info-section",
-          "解析失败。常见原因：程序集格式不受支持、.NET 10 未安装（PE 元数据 sidecar 需要）、程序集被占用或没有读取权限。",
+          "解析失败。常见原因：程序集格式不受支持、sidecar 调用失败、程序集被占用或没有读取权限。",
         ),
       );
     }
@@ -2540,6 +2649,18 @@
         vscode.postMessage({ type: "forceLoad" });
       });
       actions.appendChild(force);
+    } else if (message.kind === "dotnetMissing") {
+      var install = el("button", "ghost-button", "打开安装说明");
+      install.addEventListener("click", function () {
+        vscode.postMessage({ type: "openDotnetDownload" });
+      });
+      actions.appendChild(install);
+
+      var retry = el("button", "ghost-button", "重新检查");
+      retry.addEventListener("click", function () {
+        vscode.postMessage({ type: "reload" });
+      });
+      actions.appendChild(retry);
     }
     var fallback = el("button", "ghost-button", "以默认编辑器打开");
     fallback.addEventListener("click", function () {

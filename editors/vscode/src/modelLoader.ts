@@ -25,6 +25,14 @@ import type { ArtifactModel } from "./types";
 const MB = 1024 * 1024;
 
 /**
+ * .NET 安装说明地址。
+ *
+ * 核心的 `typescript/src/artifact/dotnet.ts` 里有一份同样的 URL（用于诊断文案）；
+ * 扩展有自己的 tsconfig rootDir，不能直接 import 核心源码，改动时请一起改。
+ */
+export const DOTNET_DOWNLOAD_URL = "https://dotnet.microsoft.com/download/dotnet/10.0";
+
+/**
  * sidecar 相对扩展根的路径。
  *
  * 发布版由打包脚本把 `tools/drawcode-metadata` 的 publish 程序集放进 VSIX；
@@ -61,6 +69,26 @@ export class CoreUnavailableError extends Error {
   }
 }
 
+/**
+ * 目标机缺少 .NET 运行时。
+ *
+ * 与 `CoreUnavailableError`（扩展自己装坏了）不同：扩展本体是完整的，只是
+ * `.dll` 的 sidecar 是框架依赖发布，需要目标机装 .NET 10+。页面要给出可执行的
+ * 安装指引，而不是显示一棵空树或停在“解析中”。
+ */
+export class DotnetUnavailableError extends Error {
+  constructor(
+    /** 简短标题，显示在错误卡片顶部。 */
+    readonly title: string,
+    /** 完整说明（含平台相关的安装命令），以普通正文展示。 */
+    readonly hint: string,
+    readonly reason: "missing" | "runtime",
+  ) {
+    super(title);
+    this.name = "DotnetUnavailableError";
+  }
+}
+
 /** 核心存在但解析失败：程序集读取异常、worker 崩溃等。 */
 export class InspectFailedError extends Error {
   constructor(
@@ -80,11 +108,16 @@ export interface ViewerSettings {
   inferEdges: boolean;
   /** 信号 + 函数超过它才走切片；0 = 总是切片，-1 = 强制全量。 */
   artifactSliceThreshold: number;
+  /** `dotnet` 可执行文件路径；空串表示自动查找。 */
+  dotnetPath: string;
 }
 
 export function readSettings(): ViewerSettings {
   const cfg = vscode.workspace.getConfiguration("drawcode");
   const threshold = cfg.get<number>("artifactSliceThreshold", 2000);
+  // 用户可能在 settings.json 里把路径写成数字等非法类型；退回空串而不是让
+  // `.trim()` 抛异常（设置错误不该让整个视图打不开）。
+  const dotnetPath = cfg.get<string>("dotnetPath", "");
   return {
     maxSizeMB: Math.max(1, cfg.get<number>("maxSizeMB", 64)),
     showCompilerGenerated: cfg.get<boolean>("showCompilerGenerated", false),
@@ -93,6 +126,7 @@ export function readSettings(): ViewerSettings {
     // 非数字（用户把设置写成字符串等）时退回默认值，避免 NaN 让比较恒为 false、
     // 悄悄关掉切片。
     artifactSliceThreshold: Number.isFinite(threshold) ? Math.trunc(threshold) : 2000,
+    dotnetPath: typeof dotnetPath === "string" ? dotnetPath.trim() : "",
   };
 }
 
@@ -148,12 +182,29 @@ export async function loadArtifactModel(
   }
   if (token.isCancellationRequested) throw cancelledError();
 
-  return parseInWorker(
+  const loaded = await parseInWorker(
     uri.fsPath,
     settings.inferEdges,
     findMetadataTool(context.extensionPath),
+    settings.dotnetPath,
     token,
   );
+
+  // 核心把 .NET 缺失当成「这类输入暂时看不了」的诊断返回；壳在这里把它升级成
+  // 页面级错误，用户才会看到安装指引和“重新检查”，而不是一棵空树。
+  const dotnetFailure = loaded.model.diagnostics.find(
+    (diag) => diag.code === "dotnet-missing" || diag.code === "dotnet-runtime-missing",
+  );
+  if (dotnetFailure !== undefined) {
+    const missing = dotnetFailure.code === "dotnet-missing";
+    throw new DotnetUnavailableError(
+      missing ? "未找到 .NET 运行时" : ".NET 运行时版本不匹配",
+      dotnetFailure.message,
+      missing ? "missing" : "runtime",
+    );
+  }
+
+  return loaded;
 }
 
 /** 取消不是错误：editor 会静默返回，命令面板也不会弹红条。 */
@@ -181,11 +232,12 @@ function parseInWorker(
   file: string,
   inferEdges: boolean,
   metadataToolPath: string | undefined,
+  dotnetPath: string,
   token: vscode.CancellationToken,
 ): Promise<LoadedArtifact> {
   return new Promise<LoadedArtifact>((resolve, reject) => {
     const worker = new Worker(path.join(__dirname, "coreWorker.js"), {
-      workerData: { file, inferEdges, metadataToolPath },
+      workerData: { file, inferEdges, metadataToolPath, dotnetPath },
     });
 
     let settled = false;
