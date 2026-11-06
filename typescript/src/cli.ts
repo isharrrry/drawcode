@@ -251,6 +251,18 @@ async function inspectCommand(
     return 2;
   }
 
+  // 工具链问题同时写一份到 stderr：stdout 必须保持纯 JSON（方便 | jq），
+  // 但终端用户不该为了看到「没装 .NET」而先去翻模型里的 diagnostics。
+  for (const diag of model.diagnostics) {
+    if (
+      diag.code === "dotnet-missing" ||
+      diag.code === "dotnet-runtime-missing" ||
+      diag.code === "tool-unavailable"
+    ) {
+      console.error(`drawcode: ${diag.message}`);
+    }
+  }
+
   const json = canonicalArtifactJson(model);
 
   if (outOption === undefined) {

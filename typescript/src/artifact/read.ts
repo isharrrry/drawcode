@@ -31,6 +31,11 @@ export interface ReadOptions {
    * 扩展从 `context.extensionPath` 下的随包目录解析，然后把结果传进来。
    */
   metadataToolPath?: string;
+  /**
+   * `dotnet` 可执行文件的显式路径，由壳提供（扩展设置 / 环境变量）。
+   * 未提供时核心按 PATH 与各平台常见安装目录查找。
+   */
+  dotnetPath?: string;
 }
 
 /**
@@ -54,7 +59,10 @@ export async function readArtifact(file: string, options: ReadOptions = {}): Pro
   // PE 走 .NET sidecar：CLI 元数据的解析交给 System.Reflection.Metadata，
   // 本仓库只保留「调用 + 消费 JSON」这一层。原生 PE 由 sidecar 返回 unsupported-native-pe。
   if (container === "pe") {
-    return readPeCli(file, name, { toolPath: options.metadataToolPath });
+    return readPeCli(file, name, {
+      toolPath: options.metadataToolPath,
+      dotnetPath: options.dotnetPath,
+    });
   }
 
   // ELF 与 ar 都在本进程内按字节解析：格式足够简单，且 C 侧模板把元数据

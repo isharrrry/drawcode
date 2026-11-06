@@ -44,11 +44,14 @@ export type DiagnosticSeverity = "error" | "warning" | "info";
  * - 格式/结构问题：`unknown-format`、`truncated-section`、`unsupported-arch`、`unsupported-native-pe`
  * - 元数据问题：`no-metadata`、`missing-metadata-section`、`version-mismatch`、`trimmed-metadata`
  * - 语义完整性问题：`dangling-read`、`dangling-write`、`gc-sections-risk`
- * - 工具链问题：`tool-unavailable`（PE 解析依赖的 .NET sidecar 不在或跑不起来）
+ * - 工具链问题：`tool-unavailable`（sidecar 不在或超时）、`dotnet-missing`（找不到
+ *   `dotnet` 命令）、`dotnet-runtime-missing`（有 dotnet 但没有兼容的 .NET 10+ 运行时）
  */
 export type DiagnosticCode =
   | "unknown-format"
   | "tool-unavailable"
+  | "dotnet-missing"
+  | "dotnet-runtime-missing"
   | "unsupported-native-pe"
   | "no-metadata"
   | "missing-metadata-section"

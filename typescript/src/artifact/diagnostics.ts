@@ -26,6 +26,8 @@ export const DIAG = {
   gcSectionsRisk: "gc-sections-risk",
   inferredEdges: "inferred-edges",
   toolUnavailable: "tool-unavailable",
+  dotnetMissing: "dotnet-missing",
+  dotnetRuntimeMissing: "dotnet-runtime-missing",
 } as const satisfies Record<string, DiagnosticCode>;
 
 /** 构造一条诊断。`subject` 用稳定 id 或 `0x` 地址，方便在视图里定位。 */
