@@ -19,6 +19,13 @@
     <AssemblyName>drawcode-metadata</AssemblyName>
     <RootNamespace>Drawcode.Metadata</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      发布是框架依赖的：目标机需要 .NET 运行时。默认的 rollForward 只允许在同一
+      主版本内前滚，只装了 .NET 11 的机器会拒绝运行 net10.0 应用。显式 LatestMajor
+      让 sidecar 在更高主版本上也能启动；扩展的检测提示相应写成「.NET 10 或更高」。
+    -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
 </Project>

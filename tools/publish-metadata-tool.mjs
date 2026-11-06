@@ -5,14 +5,16 @@
  * 为什么需要这个脚本，而不是让每个人记 `dotnet publish` 的参数：
  * 发布形态有两条互斥的路线，选错会得到「文件在、但别的机器跑不起来」这种最难查的故障。
  *
- *   1) 框架依赖（默认）：产物只有几百 KB，但目标机必须有 .NET 10 运行时；
- *      `ProjectReference` 是 `net10.0`，所以运行时也要 10.0（更高版本可向下兼容运行）。
+ *   1) 框架依赖（默认）：产物只有几百 KB，但目标机必须有 .NET 10+ 运行时。
+ *      csproj 显式设置了 RollForward=LatestMajor，因此装了 10.x 或更高主版本都能运行。
  *   2) 自包含（--self-contained）：把运行时一起打进去，单平台几十 MB，目标机无需装 .NET；
  *      必须指定 RID（运行时标识符），因为不同平台的运行时不通用。
  *
  * 发布策略（design §5.0）：开发机、CI 与 VSIX 都用框架依赖——单包跨平台，代价是
- * 目标机需要 .NET 10 运行时；目标机不能装 .NET 时再用 --self-contained 按平台打包。
- * 扩展侧先找随包目录，再回退 PATH 里的 `dotnet`。
+ * 目标机需要 .NET 10+ 运行时。**VSIX 固定不携带、不裁剪运行时**；--self-contained
+ * 仅供离线或特殊部署实验，不是插件发布路径。
+ * 扩展与 CLI 调用 sidecar 时按「显式路径 → DRAWCODE_DOTNET → PATH → 常见安装目录」
+ * 查找 `dotnet`，缺少运行时时给出安装指引（见 typescript/src/artifact/dotnet.ts）。
  *
  * 用法：
  *   node tools/publish-metadata-tool.mjs
@@ -98,9 +100,10 @@ function main() {
   if (options.selfContained) {
     args.push("--self-contained", "true", "-r", options.runtime);
   } else {
-    // 显式关掉自包含：机器上可能残留 `SelfContained=true` 的全局属性，
-    // 不写这一行会让「默认框架依赖」的承诺失效。
-    args.push("--self-contained", "false");
+    // 显式关掉自包含与裁剪：机器上可能残留 `SelfContained=true` /
+    // `PublishTrimmed=true` 的全局属性，不写这两行会让「默认框架依赖、不裁剪」
+    // 的承诺失效。
+    args.push("--self-contained", "false", "-p:PublishTrimmed=false");
   }
   if (options.output.length > 0) {
     args.push("-o", path.resolve(options.output));
