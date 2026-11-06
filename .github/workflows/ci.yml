@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+      - name: Run core tests
+        working-directory: typescript
+        run: node --test
+
+  quality:
+    name: quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+      - name: Version consistency
+        run: node scripts/bump-version.mjs --check
+      - name: Install core dependencies
+        working-directory: typescript
+        run: npm ci
+      - name: Type check core
+        working-directory: typescript
+        run: npm run typecheck
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+      - name: Type check extension
+        working-directory: editors/vscode
+        run: npm run typecheck
+
+  extension:
+    name: extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+      - name: Build
+        working-directory: editors/vscode
+        run: npm run build
+      - name: Run extension tests
+        working-directory: editors/vscode
+        run: node --test test/*.test.mjs
