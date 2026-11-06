@@ -11,8 +11,7 @@ status: stable
 [← 文档索引](index.zh-CN.md)
 
 在 VS Code 里打开 `.dll`、`.so`、`.out`、`.a`、`.o`，用可视化树浏览程序集里的模块、类型、
-信号、函数与读写关系。本页同时是打包时的 Marketplace 说明：`package-vsix.mjs`
-会去掉文档站专用的头尾，再把它复制成 VSIX 内的 `extension/README.md`。
+信号、函数与读写关系。
 
 数据来自随扩展打包的解析核心：扩展与仓库里的 CLI 调用同一个 `readArtifact`
 （`typescript/src/artifact/read.ts`），不启动外部 CLI，也不重新实现解析器。
@@ -59,7 +58,7 @@ Remote-SSH、WSL 与 Dev Container 下扩展运行在远端，请在远端安装
 打包安装：
 
 ```bash
-npm run package   # 程序集为 out/drawcode-artifact-viewer-0.4.0.vsix
+npm run package   # 程序集为 out/drawcode-artifact-viewer-0.4.1.vsix
 ```
 
 打包脚本会重新构建扩展、发布**框架依赖**的 `.NET` sidecar，并把 `dist/core`
