@@ -1,5 +1,10 @@
 # drawcode
 
+[![CI](https://github.com/isharrrry/drawcode/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/isharrrry/drawcode/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/isharrrry/drawcode)](https://github.com/isharrrry/drawcode/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![VS Code Marketplace](https://img.shields.io/badge/VS%20Code%20Marketplace-install-007ACC)](https://marketplace.visualstudio.com/items?itemName=harrrry.drawcode-artifact-viewer)
+
 [English](README.md) | **中文** | [Español](README.es.md)
 
 > 让编译产物讲清系统骨架：模块怎么交联、信号怎么流转、哪些数据要持久化。
